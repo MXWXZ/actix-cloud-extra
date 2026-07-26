@@ -1,6 +1,6 @@
 [package]
 name = "actix-cloud-extra"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["MXWXZ <matrixwxz@gmail.com>"]
 description = "Extra tools for Actix Cloud."
