@@ -1,0 +1,3 @@
+[workspace]
+members = ["actix-cloud-extra", "actix-cloud-extra-macros"]
+resolver = "2"
