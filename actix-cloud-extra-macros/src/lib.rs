@@ -71,12 +71,11 @@ pub fn default_viewer(attr: TokenStream, input: TokenStream) -> TokenStream {
     }
     if !contains("delete") {
         input.items.push(parse_quote! {
-            pub async fn delete<C>(db: &C, id: &[actix_cloud_extra::HyUuid]) -> anyhow::Result<u64>
+            pub async fn delete<C>(db: &C, id: &actix_cloud_extra::HyUuid) -> anyhow::Result<u64>
             where
                 C: sea_orm::ConnectionTrait,
             {
-                #attr::Entity::delete_many()
-                    .filter(#attr::Column::Id.is_in(actix_cloud_extra::hyuuid::uuids2strings(id)))
+                #attr::Entity::delete_by_id(*id)
                     .exec(db)
                     .await
                     .map(|x| x.rows_affected)
@@ -104,10 +103,37 @@ pub fn default_viewer(attr: TokenStream, input: TokenStream) -> TokenStream {
     .into()
 }
 
+#[cfg(feature = "seaorm")]
+/// Default timestamp generator.
+///
+/// Automatically generate `created_at` and `updated_at` on create and update.
+///
+/// # Examples
+/// ```ignore
+/// pub struct Model {
+///     ...
+///     pub created_at: DateTime,
+///     pub updated_at: DateTime,
+/// }
+///
+/// #[entity_timestamp]
+/// impl ActiveModel {}
+/// ```
 #[proc_macro_attribute]
-pub fn default_column(_: TokenStream, input: TokenStream) -> TokenStream {
-    let entity = syn::parse_macro_input!(input as syn::ItemStruct);
-
+pub fn entity_timestamp(_: TokenStream, input: TokenStream) -> TokenStream {
+    let mut entity = syn::parse_macro_input!(input as syn::ItemImpl);
+    entity.items.push(syn::parse_quote!(
+        fn entity_timestamp(&self, e: &mut Self, insert: bool) {
+            let tm: sea_orm::ActiveValue<DateTime> =
+                sea_orm::ActiveValue::set(chrono::Utc::now().naive_utc());
+            if insert {
+                e.created_at = tm.clone();
+                e.updated_at = tm.clone();
+            } else {
+                e.updated_at = tm.clone();
+            }
+        }
+    ));
     quote! {
         #entity
 
@@ -120,43 +146,6 @@ pub fn default_column(_: TokenStream, input: TokenStream) -> TokenStream {
                 Self::UpdatedAt
             }
         }
-    }
-    .into()
-}
-
-#[cfg(feature = "seaorm")]
-/// Default timestamp generator.
-///
-/// Automatically generate `created_at` and `updated_at` on create and update.
-///
-/// # Examples
-/// ```ignore
-/// pub struct Model {
-///     ...
-///     pub created_at: i64,
-///     pub updated_at: i64,
-/// }
-///
-/// #[entity_timestamp]
-/// impl ActiveModel {}
-/// ```
-#[proc_macro_attribute]
-pub fn entity_timestamp(_: TokenStream, input: TokenStream) -> TokenStream {
-    let mut entity = syn::parse_macro_input!(input as syn::ItemImpl);
-    entity.items.push(syn::parse_quote!(
-        fn entity_timestamp(&self, e: &mut Self, insert: bool) {
-            let tm: sea_orm::ActiveValue<i64> =
-                sea_orm::ActiveValue::set(chrono::Utc::now().timestamp_millis());
-            if insert {
-                e.created_at = tm.clone();
-                e.updated_at = tm.clone();
-            } else {
-                e.updated_at = tm.clone();
-            }
-        }
-    ));
-    quote! {
-        #entity
     }
     .into()
 }

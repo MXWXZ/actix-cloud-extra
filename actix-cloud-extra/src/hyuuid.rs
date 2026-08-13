@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 #[cfg(feature = "seaorm")]
-use sea_orm::prelude::*;
+use sea_orm::{TryFromU64, prelude::*};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use uuid::Uuid;
 
@@ -38,8 +38,11 @@ impl HyUuid {
     }
 }
 
-pub fn uuids2strings(u: &[HyUuid]) -> Vec<String> {
-    u.iter().map(ToString::to_string).collect()
+#[cfg(feature = "seaorm")]
+impl TryFromU64 for HyUuid {
+    fn try_from_u64(_: u64) -> Result<Self, DbErr> {
+        Err(DbErr::ConvertFromU64(stringify!(HyUuid)))
+    }
 }
 
 impl Serialize for HyUuid {
@@ -117,20 +120,5 @@ mod tests {
     #[test]
     fn serde_bad_input() {
         assert!(serde_json::from_str::<HyUuid>("\"not-a-uuid\"").is_err());
-    }
-
-    #[test]
-    fn uuids2strings_empty() {
-        assert!(uuids2strings(&[]).is_empty());
-    }
-
-    #[test]
-    fn uuids2strings_values() {
-        let a = HyUuid::nil();
-        let b = HyUuid::new();
-        let s = uuids2strings(&[a, b]);
-        assert_eq!(s.len(), 2);
-        assert_eq!(s[0], a.to_string());
-        assert_eq!(s[1], b.to_string());
     }
 }

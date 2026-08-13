@@ -183,7 +183,14 @@ impl Condition {
         self
     }
 
-    pub fn parse_sort(mut self, str: String, col: Vec<ColumnRef>) -> Self {
+    pub fn parse_sort_option(mut self, str: &Option<String>, col: Vec<ColumnRef>) -> Self {
+        if let Some(str) = str {
+            self = self.parse_sort(str, col)
+        }
+        self
+    }
+
+    pub fn parse_sort(mut self, str: &str, col: Vec<ColumnRef>) -> Self {
         let mut allow: BTreeMap<String, ColumnRef> = col
             .into_iter()
             .map(|x| (x.column().unwrap().to_string(), x))
