@@ -41,7 +41,7 @@ impl DataUrl {
     pub fn decode<S: AsRef<str>>(data: S) -> Option<Self> {
         let data: Vec<_> = data.as_ref().split(',').collect();
         if data.len() == 2 {
-            BASE64_STANDARD.decode(data[1]).map_or(None, Self::new)
+            BASE64_STANDARD.decode(data[1]).ok().and_then(Self::new)
         } else {
             None
         }

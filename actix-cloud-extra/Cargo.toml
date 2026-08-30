@@ -1,6 +1,6 @@
 [package]
 name = "actix-cloud-extra"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 authors = ["MXWXZ <matrixwxz@gmail.com>"]
 description = "Extra tools for Actix Cloud."
@@ -15,7 +15,6 @@ api = [
     "actix-cloud/utils",
     "dep:serde-inline-default",
     "dep:validator",
-    "dep:serde_with",
     "dep:derivative",
 ]
 entity = ["seaorm", "dep:serde", "dep:serde_json"]
@@ -28,14 +27,13 @@ macros = ["dep:actix-cloud-extra-macros"]
 [dependencies]
 anyhow = { version = "1.0", optional = true }
 derivative = { version = "2.2", optional = true }
-uuid = { version = "1.24", features = [
+uuid = { version = "1.26", features = [
     "v4",
     "macro-diagnostics",
     "fast-rng",
 ], optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde-inline-default = { version = "1.0", optional = true }
-serde_with = { version = "3.21", optional = true }
 serde_json = { version = "1.0", optional = true }
 validator = { version = "0.20", features = ["derive"], optional = true }
 base64 = { version = "0.23", optional = true }

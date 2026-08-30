@@ -6,11 +6,16 @@ use syn::{Ident, ImplItem, ItemImpl, parse_macro_input, parse_quote};
 
 /// Implement default viewer.
 ///
+/// Generates default CRUD methods (`find`, `find_by_id`, `delete_all`,
+/// `delete`, `count`) on the viewer struct; existing methods with the same
+/// name are kept untouched. The attribute argument is the entity module path,
+/// whose `Entity`/`Model` types are used.
+///
 /// # Examples
 /// ```ignore
 /// pub struct UserViewer;
 ///
-/// #[default_viewer]
+/// #[default_viewer(users)]
 /// impl UserViewer {}
 /// ```
 #[proc_macro_attribute]
@@ -107,6 +112,9 @@ pub fn default_viewer(attr: TokenStream, input: TokenStream) -> TokenStream {
 /// Default timestamp generator.
 ///
 /// Automatically generate `created_at` and `updated_at` on create and update.
+/// On insert both fields are set to the current UTC time; on update only
+/// `updated_at` is refreshed. Also implements
+/// `actix_cloud_extra::entity::DefaultColumnTrait` for `Column`.
 ///
 /// # Examples
 /// ```ignore
@@ -153,7 +161,8 @@ pub fn entity_timestamp(_: TokenStream, input: TokenStream) -> TokenStream {
 #[cfg(feature = "seaorm")]
 /// Default id generator.
 ///
-/// Automatically generate `id` on create.
+/// Automatically generate `id` on create, only when the field is not already
+/// set.
 ///
 /// # Examples
 /// ```ignore
@@ -187,6 +196,10 @@ pub fn entity_id(attr: TokenStream, input: TokenStream) -> TokenStream {
 /// - `entity_id`
 /// - `entity_timestamp`
 ///
+/// The two helpers must already be generated on the same `impl ActiveModel`
+/// block (see the example), and `async_trait` must be available as a
+/// dependency of the crate using this macro.
+///
 /// # Examples
 /// ```ignore
 /// #[entity_id(rand_i64())]
@@ -219,7 +232,7 @@ pub fn entity_behavior(_: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 #[cfg(feature = "seaorm")]
-/// Implement `into` for entity to partial entity.
+/// Implement `From` for entity to partial entity.
 /// The fields should be exactly the same.
 ///
 /// # Examples
@@ -245,13 +258,13 @@ pub fn partial_entity(attr: TokenStream, input: TokenStream) -> TokenStream {
     let mut fields = Vec::new();
     for i in &input.fields {
         let field_name = &i.ident;
-        fields.push(quote!(#field_name: self.#field_name,));
+        fields.push(quote!(#field_name: val.#field_name,));
     }
 
     quote! {
         #input
-        impl Into<#name> for #attr {
-            fn into(self) -> #name {
+        impl From<#attr> for #name {
+            fn from(val: #attr) -> Self {
                 #name {
                     #(#fields)*
                 }

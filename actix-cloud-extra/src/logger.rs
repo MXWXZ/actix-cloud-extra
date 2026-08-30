@@ -1,3 +1,9 @@
+//! Default logger setup for Actix Cloud applications.
+//!
+//! The output is normalized for readability:
+//! - Target: only keeps the first path before `::` (e.g. `project::module1::module2` => `project`).
+//! - Filename: only keeps the path starting from the last `src` (e.g. `/a/b/src/c/d/main.rs` => `src/c/d/main.rs`).
+
 use std::path::PathBuf;
 
 use actix_cloud::{
@@ -5,6 +11,7 @@ use actix_cloud::{
     tracing::Level,
 };
 
+/// Transform a log item before printing, see [module docs](self) for the rules.
 fn transformer(mut item: LogItem) -> LogItem {
     // Trim target path.
     // Only keep the first path before `::`. Change several library targets to our own.
@@ -35,6 +42,15 @@ fn transformer(mut item: LogItem) -> LogItem {
     item
 }
 
+/// Start the default logger.
+///
+/// - `enable`: when `false`, nothing is started and `(None, None)` is returned.
+/// - `json`: output JSON lines instead of plain text.
+/// - `verbose`: include file name and line number, and log at `DEBUG` level.
+/// - `filter`: extra predicate, items returning `false` are dropped.
+///
+/// Returns the logger and a guard which stops logging when dropped; both are
+/// `Some` on success and `None` when the logger is disabled.
 pub fn start_logger(
     enable: bool,
     json: bool,
