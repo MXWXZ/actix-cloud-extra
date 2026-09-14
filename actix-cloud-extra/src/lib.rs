@@ -9,7 +9,7 @@
 //! - `entity`: SeaORM entity helpers like [`entity::VecString`] and [`entity::DefaultColumnTrait`].
 //! - `logger`: [`logger::start_logger`], a sensible default logger for Actix Cloud applications.
 //! - `seaorm`: SeaORM query helpers like [`api::SelectPage`], [`api::IntoExpr`] and [`api::Condition`].
-//! - `macros`: re-export of the proc macros (`default_viewer`, `entity_id`, ...).
+//! - `macros`: re-export of the proc macros (`default_service`, `entity_id`, ...).
 //! - `utils`: [`utils::StringUtil`] and [`utils::DataUrl`] (also pulled in by `api`).
 //!
 //! Default features: `api`, `entity`, `logger`, `seaorm` and `macros`, which

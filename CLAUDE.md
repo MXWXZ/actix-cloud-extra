@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Rust workspace providing extra tools (helpers, proc macros) for [Actix Cloud](https://github.com/MXWXZ/actix-cloud). Edition 2024. Two crates:
 
 - `actix-cloud-extra/` — the library. Every module is behind a cargo feature: `hyuuid`, `api`, `entity`, `logger`, `utils`, `seaorm`, `macros`. Default = all except `utils` standalone (it's pulled in via `api`).
-- `actix-cloud-extra-macros/` — proc macros (`default_viewer`, `entity_id`, `entity_timestamp`, `entity_behavior`, `partial_entity`). Has a `seaorm` feature toggled by the main crate's `seaorm` feature.
+- `actix-cloud-extra-macros/` — proc macros (`default_service`, `entity_id`, `entity_timestamp`, `entity_behavior`, `partial_entity`). Has a `seaorm` feature toggled by the main crate's `seaorm` feature.
 
 ## Commands
 
@@ -22,7 +22,7 @@ Because everything is feature-gated, `--all-features` builds can pass while a si
 
 ### Macros generate code that references the main crate's paths
 
-`actix-cloud-extra-macros` has no dependency on the main crate, but its expanded code hard-codes paths like `actix_cloud_extra::api::Condition`, `actix_cloud_extra::HyUuid`, and `actix_cloud_extra::entity::DefaultColumnTrait` (see `default_viewer` and `entity_timestamp` in `actix-cloud-extra-macros/src/lib.rs`). Renaming/moving public items in the main crate silently breaks the macros at downstream expansion time — keep the two crates in sync conceptually.
+`actix-cloud-extra-macros` has no dependency on the main crate, but its expanded code hard-codes paths like `actix_cloud_extra::api::Condition`, `actix_cloud_extra::HyUuid`, and `actix_cloud_extra::entity::DefaultColumnTrait` (see `default_service` and `entity_timestamp` in `actix-cloud-extra-macros/src/lib.rs`). Renaming/moving public items in the main crate silently breaks the macros at downstream expansion time — keep the two crates in sync conceptually.
 
 ### Entity macro stacking (seaorm)
 
@@ -30,7 +30,7 @@ Because everything is feature-gated, `--all-features` builds can pass while a si
 
 ### `Condition` is the query hub
 
-`api::Condition` wraps a `sea_orm::Condition` + optional `PaginationParam` + sort list. `default_viewer`-generated CRUD (`find`, `count`, …) all funnel through `Condition::build`/`select_page`. `PaginationParam` applies `#[validate]` ranges (`page >= 1`, `1 <= size <= 100`) and is used both for SQL pagination (`SelectPage` trait) and in-memory splitting (`split`).
+`api::Condition` wraps a `sea_orm::Condition` + optional `PaginationParam` + sort list. `default_service`-generated CRUD (`find`, `count`, …) all funnel through `Condition::build`/`select_page`. `PaginationParam` applies `#[validate]` ranges (`page >= 1`, `1 <= size <= 100`) and is used both for SQL pagination (`SelectPage` trait) and in-memory splitting (`split`).
 
 ### `HyUuid` is the universal ID type
 

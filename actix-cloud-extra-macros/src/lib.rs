@@ -4,22 +4,22 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Ident, ImplItem, ItemImpl, parse_macro_input, parse_quote};
 
-/// Implement default viewer.
+/// Implement default service.
 ///
 /// Generates default CRUD methods (`find`, `find_by_id`, `delete_all`,
-/// `delete`, `count`) on the viewer struct; existing methods with the same
+/// `delete`, `count`) on the service struct; existing methods with the same
 /// name are kept untouched. The attribute argument is the entity module path,
 /// whose `Entity`/`Model` types are used.
 ///
 /// # Examples
 /// ```ignore
-/// pub struct UserViewer;
+/// pub struct UserService;
 ///
-/// #[default_viewer(users)]
-/// impl UserViewer {}
+/// #[default_service(users)]
+/// impl UserService {}
 /// ```
 #[proc_macro_attribute]
-pub fn default_viewer(attr: TokenStream, input: TokenStream) -> TokenStream {
+pub fn default_service(attr: TokenStream, input: TokenStream) -> TokenStream {
     let attr = parse_macro_input!(attr as Ident);
     let mut input = parse_macro_input!(input as ItemImpl);
     let func: Vec<String> = input
