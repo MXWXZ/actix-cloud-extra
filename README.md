@@ -15,7 +15,7 @@ Actix Cloud Extra is highly configurable: you can enable only the features you n
 | [entity](#entity) | enabled  | SeaORM entity helpers                                           |
 | [logger](#logger) | enabled  | Default logger for Actix Cloud applications                     |
 | [seaorm](#seaorm) | enabled  | SeaORM query helpers                                            |
-| [macros](#macros) | enabled  | Proc macros (`default_service`, `entity_id`, ...)                |
+| [macros](#macros) | enabled  | Proc macros (`default_repo`, `entity_id`, ...)                  |
 | [utils](#utils)   | disabled | String and data URL helpers (pulled in by `api`)                |
 
 ## Installation
@@ -143,10 +143,10 @@ impl ActiveModel {}
 #[entity_behavior]              // enable `entity_id` and `entity_timestamp` on save
 impl ActiveModelBehavior for ActiveModel {}
 
-pub struct UserService;
+pub struct UserRepo;
 
-#[default_service(user)]        // find / find_by_id / delete_all / delete / count
-impl UserService {}
+#[default_repo(user)]           // find / find_by_id / delete_all / delete / count
+impl UserRepo {}
 
 #[partial_entity(user::Model)]
 #[derive(serde::Serialize)]
@@ -160,7 +160,7 @@ let rsp: UserRsp = model.into();
 
 ### macros
 
-Re-export of the proc macros (`default_service`, `entity_id`, `entity_timestamp`, `entity_behavior`, `partial_entity`), see [seaorm](#seaorm) for usage.
+Re-export of the proc macros (`default_repo`, `entity_id`, `entity_timestamp`, `entity_behavior`, `partial_entity`), see [seaorm](#seaorm) for usage.
 
 ### utils
 
