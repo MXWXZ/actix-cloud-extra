@@ -359,21 +359,22 @@ pub struct OptionIDsReq {
 /// Created/updated time range filters, consumed by
 /// [`Condition::add_time`].
 ///
-/// All values are naive UTC datetimes, the same type the `entity_timestamp`
-/// macro stores, and deserialize from *strings* like `2024-01-01T00:00:00`
-/// (`T` separator required, fractional seconds optional).
+/// All values are UTC datetimes, the same type the `entity_timestamp`
+/// macro stores, and deserialize from RFC 3339 *strings* like
+/// `2024-01-01T00:00:00Z` (a timezone offset is required; non-UTC offsets
+/// are converted to UTC).
 #[cfg(feature = "seaorm")]
 #[derive(Debug, Deserialize, Validate)]
 pub struct TimeParam {
     /// `created_at >= created_start` filter.
-    pub created_start: Option<DateTime>,
+    pub created_start: Option<DateTimeUtc>,
     /// `created_at <= created_end` filter.
-    pub created_end: Option<DateTime>,
+    pub created_end: Option<DateTimeUtc>,
 
     /// `updated_at >= updated_start` filter.
-    pub updated_start: Option<DateTime>,
+    pub updated_start: Option<DateTimeUtc>,
     /// `updated_at <= updated_end` filter.
-    pub updated_end: Option<DateTime>,
+    pub updated_end: Option<DateTimeUtc>,
 }
 
 #[cfg(test)]
@@ -502,17 +503,22 @@ mod tests {
     #[test]
     fn time_param_deserialize() {
         let p: TimeParam = serde_json::from_str(
-            r#"{"created_start": "2024-01-01T00:00:00", "created_end": "2024-01-01T23:59:59.5"}"#,
+            r#"{"created_start": "2024-01-01T00:00:00Z", "created_end": "2024-01-01T23:59:59.5+08:00"}"#,
         )
         .unwrap();
         assert!(p.created_start.is_some());
         assert!(p.created_end.is_some());
         assert!(p.updated_start.is_none());
         assert!(p.updated_end.is_none());
+        // Non-UTC offsets are converted to UTC: 23:59:59.5+08:00 is 15:59:59.5Z.
+        let expect: DateTimeUtc = "2024-01-01T15:59:59.5Z".parse().unwrap();
+        assert_eq!(p.created_end.unwrap(), expect);
 
-        // The space-separated `Display` form is rejected, only `T` is accepted.
+        // A timezone offset is required: naive strings are rejected, even
+        // with the `T` separator (a space separator is accepted by RFC 3339
+        // when the offset is present).
         assert!(
-            serde_json::from_str::<TimeParam>(r#"{"created_start": "2024-01-01 00:00:00"}"#)
+            serde_json::from_str::<TimeParam>(r#"{"created_start": "2024-01-01T00:00:00"}"#)
                 .is_err()
         );
     }

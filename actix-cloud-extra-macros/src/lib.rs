@@ -120,8 +120,8 @@ pub fn default_repo(attr: TokenStream, input: TokenStream) -> TokenStream {
 /// ```ignore
 /// pub struct Model {
 ///     ...
-///     pub created_at: DateTime,
-///     pub updated_at: DateTime,
+///     pub created_at: DateTimeUtc,
+///     pub updated_at: DateTimeUtc,
 /// }
 ///
 /// #[entity_timestamp]
@@ -132,8 +132,8 @@ pub fn entity_timestamp(_: TokenStream, input: TokenStream) -> TokenStream {
     let mut entity = syn::parse_macro_input!(input as syn::ItemImpl);
     entity.items.push(syn::parse_quote!(
         fn entity_timestamp(&self, e: &mut Self, insert: bool) {
-            let tm: sea_orm::ActiveValue<DateTime> =
-                sea_orm::ActiveValue::set(chrono::Utc::now().naive_utc());
+            let tm: sea_orm::ActiveValue<DateTimeUtc> =
+                sea_orm::ActiveValue::set(chrono::Utc::now());
             if insert {
                 e.created_at = tm.clone();
                 e.updated_at = tm.clone();

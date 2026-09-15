@@ -1,6 +1,6 @@
 [package]
 name = "actix-cloud-extra-macros"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 authors = ["MXWXZ <matrixwxz@gmail.com>"]
 description = "Proc macros for Actix Cloud Extra."
