@@ -1,6 +1,6 @@
 [package]
 name = "actix-cloud-extra"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 authors = ["MXWXZ <matrixwxz@gmail.com>"]
 description = "Extra tools for Actix Cloud."
@@ -45,7 +45,7 @@ sea-orm = { version = "2.0", features = [
     "macros",
     "debug-print",
 ], optional = true }
-actix-cloud = { version = "0.6", default-features = false, optional = true }
+actix-cloud = { version = "0.7", default-features = false, optional = true }
 actix-cloud-extra-macros = { version = "0.1", default-features = false, path = "../actix-cloud-extra-macros", optional = true }
 
 [dev-dependencies]
