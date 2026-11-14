@@ -29,14 +29,14 @@ The default features are `api`, `entity`, `logger`, `seaorm`, and `macros`; `api
 
 ```toml
 [dependencies]
-actix-cloud-extra = "0.1"
+actix-cloud-extra = "0.2"
 ```
 
 Or with only the features you need:
 
 ```toml
 [dependencies]
-actix-cloud-extra = { version = "0.1", default-features = false, features = ["hyuuid", "utils"] }
+actix-cloud-extra = { version = "0.2", default-features = false, features = ["hyuuid", "utils"] }
 ```
 
 **MSRV:** Rust 1.94 (edition 2024).
@@ -200,7 +200,7 @@ The macros expand to code that references `sea_orm`, `chrono`, `async-trait`, an
 
 ```toml
 [dependencies]
-actix-cloud-extra = { version = "0.1", features = ["entity", "macros", "seaorm"] }
+actix-cloud-extra = { version = "0.2", features = ["entity", "macros", "seaorm"] }
 async-trait = "0.1"
 chrono = "0.4"
 sea-orm = "2"

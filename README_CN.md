@@ -29,14 +29,14 @@
 
 ```toml
 [dependencies]
-actix-cloud-extra = "0.1"
+actix-cloud-extra = "0.2"
 ```
 
 或只启用需要的 feature：
 
 ```toml
 [dependencies]
-actix-cloud-extra = { version = "0.1", default-features = false, features = ["hyuuid", "utils"] }
+actix-cloud-extra = { version = "0.2", default-features = false, features = ["hyuuid", "utils"] }
 ```
 
 **MSRV：** Rust 1.94（edition 2024）。
@@ -200,7 +200,7 @@ pub struct UserRsp {
 
 ```toml
 [dependencies]
-actix-cloud-extra = { version = "0.1", features = ["entity", "macros", "seaorm"] }
+actix-cloud-extra = { version = "0.2", features = ["entity", "macros", "seaorm"] }
 async-trait = "0.1"
 chrono = "0.4"
 sea-orm = "2"
