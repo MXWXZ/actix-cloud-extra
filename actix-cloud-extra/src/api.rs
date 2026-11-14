@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::hash::Hash;
 
-use anyhow::Result;
 #[cfg(feature = "seaorm")]
 use sea_orm::{
     ExprTrait as _, FromQueryResult, Order, QueryOrder as _,
@@ -18,6 +17,8 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use validator::{Validate, ValidationError};
 
+#[cfg(feature = "seaorm")]
+use crate::Error;
 use crate::HyUuid;
 #[cfg(feature = "entity")]
 use crate::entity::DefaultColumnTrait;
@@ -124,7 +125,16 @@ where
     ///
     /// `size == 0` and offsets that would overflow `u64` return an error
     /// instead of panicking or wrapping.
-    async fn select_page(self, db: &C, p: Option<PaginationParam>) -> Result<(Vec<E::Model>, u64)>;
+    ///
+    /// # Errors
+    /// Returns [`Error::PaginationSize`] when `size == 0`,
+    /// [`Error::PaginationOverflow`] when the offset overflows `u64`, and
+    /// [`Error::Db`] when the query fails.
+    async fn select_page(
+        self,
+        db: &C,
+        p: Option<PaginationParam>,
+    ) -> crate::Result<(Vec<E::Model>, u64)>;
 }
 
 #[cfg(feature = "seaorm")]
@@ -135,17 +145,21 @@ where
     M: FromQueryResult + Sized + Send + Sync,
     C: ConnectionTrait,
 {
-    async fn select_page(self, db: &C, p: Option<PaginationParam>) -> Result<(Vec<E::Model>, u64)> {
+    async fn select_page(
+        self,
+        db: &C,
+        p: Option<PaginationParam>,
+    ) -> crate::Result<(Vec<E::Model>, u64)> {
         if let Some(page) = p {
             // SeaORM asserts `page_size != 0` and multiplies
             // `page_size * page_index` without checks; reject both here so
             // unvalidated request parameters cannot panic or wrap.
             if page.size == 0 {
-                anyhow::bail!("pagination size must be at least 1");
+                return Err(Error::PaginationSize);
             }
             let page_index = page.page.saturating_sub(1);
             if page_index.checked_mul(page.size).is_none() {
-                anyhow::bail!("pagination offset overflows u64");
+                return Err(Error::PaginationOverflow);
             }
             let q = self.paginate(db, page.size);
             Ok((q.fetch_page(page_index).await?, q.num_items().await?))
@@ -344,7 +358,14 @@ impl Condition {
     /// Without a page attached via [`Condition::add_page`], the entire result
     /// set is loaded into memory. See [`SelectPage::select_page`] for the
     /// safety checks on `size` and the offset.
-    pub async fn select_page<M, E, C>(self, q: Select<E>, db: &C) -> Result<(Vec<E::Model>, u64)>
+    ///
+    /// # Errors
+    /// See [`SelectPage::select_page`].
+    pub async fn select_page<M, E, C>(
+        self,
+        q: Select<E>,
+        db: &C,
+    ) -> crate::Result<(Vec<E::Model>, u64)>
     where
         E: EntityTrait<Model = M>,
         M: FromQueryResult + Sized + Send + Sync,
@@ -1046,6 +1067,33 @@ mod tests {
 
             let log = db.into_transaction_log();
             assert!(log[0].statements()[0].sql.contains("LIMIT"));
+        }
+
+        #[test]
+        fn boundary_select_page_zero_size_error_variant() {
+            let db = MockDatabase::new(DbBackend::Sqlite).into_connection();
+            let err = block_on(
+                Condition::new_all()
+                    .add_page(PaginationParam { page: 1, size: 0 })
+                    .select_page(notes::Entity::find(), &db),
+            )
+            .unwrap_err();
+            assert!(matches!(err, Error::PaginationSize));
+        }
+
+        #[test]
+        fn extreme_select_page_offset_overflow_error_variant() {
+            let db = MockDatabase::new(DbBackend::Sqlite).into_connection();
+            let err = block_on(
+                Condition::new_all()
+                    .add_page(PaginationParam {
+                        page: u64::MAX,
+                        size: 100,
+                    })
+                    .select_page(notes::Entity::find(), &db),
+            )
+            .unwrap_err();
+            assert!(matches!(err, Error::PaginationOverflow));
         }
 
         // ---- extreme ----

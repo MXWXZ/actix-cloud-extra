@@ -15,12 +15,12 @@ api = ["hyuuid", "utils", "dep:validator"]
 entity = ["seaorm", "dep:serde", "dep:serde_json"]
 utils = ["dep:base64", "dep:infer"]
 logger = ["actix-cloud/logger"]
-hyuuid = ["dep:uuid", "dep:anyhow", "dep:serde"]
+hyuuid = ["dep:uuid", "dep:thiserror", "dep:serde"]
 seaorm = ["dep:sea-orm", "actix-cloud-extra-macros/seaorm"]
 macros = ["dep:actix-cloud-extra-macros"]
 
 [dependencies]
-anyhow = { version = "1.0.104", optional = true }
+thiserror = { version = "2.0.21", optional = true }
 uuid = { version = "1.29.2", features = [
     "v4",
     "macro-diagnostics",

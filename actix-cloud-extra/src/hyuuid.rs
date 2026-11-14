@@ -2,7 +2,7 @@
 
 use std::fmt::{self, Display};
 
-use anyhow::{Result, bail};
+use crate::Error;
 #[cfg(feature = "seaorm")]
 use sea_orm::{TryFromU64, prelude::*};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
@@ -46,15 +46,16 @@ impl HyUuid {
     /// through serde; every other value must be a version 4 UUID.
     ///
     /// # Errors
-    /// Will return `Err` when `str` is not a 36-char hyphenated UUID, or is
-    /// neither nil nor a version 4 UUID.
-    pub fn parse(str: &str) -> Result<Self> {
+    /// Returns [`Error::UuidLength`] when `str` is not 36 bytes,
+    /// [`Error::UuidVersion`] when it is neither nil nor a version 4 UUID, and
+    /// [`Error::Uuid`] when it is not a valid UUID string.
+    pub fn parse(str: &str) -> crate::Result<Self> {
         if str.len() != 36 {
-            bail!("uuid error: uuid must be 36 bytes");
+            return Err(Error::UuidLength);
         }
         let u = Uuid::parse_str(str)?;
         if !u.is_nil() && u.get_version_num() != 4 {
-            bail!("uuid error: only uuid v4 is allowed");
+            return Err(Error::UuidVersion);
         }
         Ok(Self(u))
     }
@@ -209,8 +210,12 @@ mod tests {
 
     #[test]
     fn parse_wrong_len() {
-        assert!(HyUuid::parse("550e8400-e29b-41d4-a716-44665544000").is_err());
-        assert!(HyUuid::parse("550e8400-e29b-41d4-a716-4466554400000").is_err());
+        for input in [
+            "550e8400-e29b-41d4-a716-44665544000",
+            "550e8400-e29b-41d4-a716-4466554400000",
+        ] {
+            assert!(matches!(HyUuid::parse(input), Err(Error::UuidLength)));
+        }
     }
 
     #[test]
@@ -224,14 +229,20 @@ mod tests {
 
     #[test]
     fn parse_bad_hex() {
-        assert!(HyUuid::parse("550e8400-e29b-41d4-a716-44665544000z").is_err());
+        let err = HyUuid::parse("550e8400-e29b-41d4-a716-44665544000z").unwrap_err();
+        assert!(matches!(err, Error::Uuid(_)));
+        assert!(std::error::Error::source(&err).is_some());
     }
 
     #[test]
     fn parse_wrong_version() {
         // Structurally valid v1 / v7 UUIDs must be rejected.
-        assert!(HyUuid::parse("550e8400-e29b-11d4-a716-446655440000").is_err());
-        assert!(HyUuid::parse("550e8400-e29b-71d4-a716-446655440000").is_err());
+        for input in [
+            "550e8400-e29b-11d4-a716-446655440000",
+            "550e8400-e29b-71d4-a716-446655440000",
+        ] {
+            assert!(matches!(HyUuid::parse(input), Err(Error::UuidVersion)));
+        }
     }
 
     #[test]
@@ -262,6 +273,15 @@ mod tests {
     #[test]
     fn serde_bad_input() {
         assert!(serde_json::from_str::<HyUuid>("\"not-a-uuid\"").is_err());
+    }
+
+    #[test]
+    fn serde_error_message_preserved() {
+        let err = serde_json::from_str::<HyUuid>("\"short\"").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("uuid error: uuid must be 36 bytes")
+        );
     }
 
     #[test]

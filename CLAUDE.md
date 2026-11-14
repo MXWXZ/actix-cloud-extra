@@ -23,7 +23,7 @@ Because everything is feature-gated, `--all-features` builds can pass while a si
 
 ### Macros generate code that references the main crate's paths
 
-`actix-cloud-extra-macros` has no dependency on the main crate, but its expanded code hard-codes paths like `actix_cloud_extra::api::Condition`, `actix_cloud_extra::HyUuid`, and `actix_cloud_extra::entity::DefaultColumnTrait` (see `default_repo` and `entity_timestamp` in `actix-cloud-extra-macros/src/lib.rs`). Renaming/moving public items in the main crate silently breaks the macros at downstream expansion time — keep the two crates in sync conceptually.
+`actix-cloud-extra-macros` has no dependency on the main crate, but its expanded code hard-codes paths like `actix_cloud_extra::api::Condition`, `actix_cloud_extra::HyUuid`, `actix_cloud_extra::Result`/`Error`, and `actix_cloud_extra::entity::DefaultColumnTrait` (see `default_repo` and `entity_timestamp` in `actix-cloud-extra-macros/src/lib.rs`). Renaming/moving public items in the main crate silently breaks the macros at downstream expansion time — keep the two crates in sync conceptually.
 
 ### Entity macro stacking (seaorm)
 

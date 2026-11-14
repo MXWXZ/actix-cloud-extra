@@ -19,6 +19,11 @@ use syn::{Ident, ImplItem, ItemImpl, parse_macro_input, parse_quote};
 /// The generated methods perform no tenant/ownership checks; authorize
 /// `find_by_id`, `delete`, and any filtered query before calling them.
 ///
+/// They return `actix_cloud_extra::Result`, i.e. the crate-wide
+/// `actix_cloud_extra::Error`. Downstream crates therefore do not need
+/// `anyhow` or `thiserror` as direct dependencies; the `api` and `seaorm`
+/// features must be enabled (which implies `hyuuid`).
+///
 /// # Examples
 /// ```ignore
 /// pub struct UserRepo;
@@ -47,7 +52,7 @@ pub fn default_repo(attr: TokenStream, input: TokenStream) -> TokenStream {
             pub async fn find<C>(
                 db: &C,
                 cond: actix_cloud_extra::api::Condition,
-            ) -> anyhow::Result<(Vec<#attr::Model>, u64)>
+            ) -> actix_cloud_extra::Result<(Vec<#attr::Model>, u64)>
             where
                 C: sea_orm::ConnectionTrait
             {
@@ -57,20 +62,20 @@ pub fn default_repo(attr: TokenStream, input: TokenStream) -> TokenStream {
     }
     if !contains("find_by_id") {
         input.items.push(parse_quote! {
-            pub async fn find_by_id<C>(db: &C, id: &actix_cloud_extra::HyUuid) -> anyhow::Result<Option<#attr::Model>>
+            pub async fn find_by_id<C>(db: &C, id: &actix_cloud_extra::HyUuid) -> actix_cloud_extra::Result<Option<#attr::Model>>
             where
                 C: sea_orm::ConnectionTrait,
             {
                 #attr::Entity::find_by_id(id.to_owned())
                     .one(db)
                     .await
-                    .map_err(Into::into)
+                    .map_err(actix_cloud_extra::Error::from)
             }
         });
     }
     if !contains("delete_all") {
         input.items.push(parse_quote! {
-            pub async fn delete_all<C>(db: &C) -> anyhow::Result<u64>
+            pub async fn delete_all<C>(db: &C) -> actix_cloud_extra::Result<u64>
             where
                 C: sea_orm::ConnectionTrait,
             {
@@ -78,13 +83,13 @@ pub fn default_repo(attr: TokenStream, input: TokenStream) -> TokenStream {
                     .exec(db)
                     .await
                     .map(|x| x.rows_affected)
-                    .map_err(Into::into)
+                    .map_err(actix_cloud_extra::Error::from)
             }
         });
     }
     if !contains("delete") {
         input.items.push(parse_quote! {
-            pub async fn delete<C>(db: &C, id: &actix_cloud_extra::HyUuid) -> anyhow::Result<u64>
+            pub async fn delete<C>(db: &C, id: &actix_cloud_extra::HyUuid) -> actix_cloud_extra::Result<u64>
             where
                 C: sea_orm::ConnectionTrait,
             {
@@ -92,7 +97,7 @@ pub fn default_repo(attr: TokenStream, input: TokenStream) -> TokenStream {
                     .exec(db)
                     .await
                     .map(|x| x.rows_affected)
-                    .map_err(Into::into)
+                    .map_err(actix_cloud_extra::Error::from)
             }
         });
     }
@@ -101,7 +106,7 @@ pub fn default_repo(attr: TokenStream, input: TokenStream) -> TokenStream {
             pub async fn count<C>(
                 db: &C,
                 cond: actix_cloud_extra::api::Condition,
-            ) -> anyhow::Result<u64>
+            ) -> actix_cloud_extra::Result<u64>
             where
                 C: sea_orm::ConnectionTrait,
             {

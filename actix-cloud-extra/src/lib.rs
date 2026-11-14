@@ -12,6 +12,9 @@
 //! - `macros`: re-export of the proc macros (`default_repo`, `entity_id`, ...).
 //! - `utils`: [`utils::StringUtil`] and [`utils::DataUrl`] (also pulled in by `api`).
 //!
+//! The `hyuuid` feature also provides the crate-wide [`Error`] and [`Result`]
+//! types returned by all fallible APIs (including the `default_repo` macros).
+//!
 //! Default features: `api`, `entity`, `logger`, `seaorm` and `macros`, which
 //! enable `hyuuid` and `utils` transitively.
 
@@ -24,11 +27,15 @@ pub mod api;
 #[cfg(feature = "entity")]
 pub mod entity;
 #[cfg(feature = "hyuuid")]
+pub mod error;
+#[cfg(feature = "hyuuid")]
 pub mod hyuuid;
 #[cfg(feature = "logger")]
 pub mod logger;
 #[cfg(feature = "utils")]
 pub mod utils;
 
+#[cfg(feature = "hyuuid")]
+pub use error::{Error, Result};
 #[cfg(feature = "hyuuid")]
 pub use hyuuid::HyUuid;

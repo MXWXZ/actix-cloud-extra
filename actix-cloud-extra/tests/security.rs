@@ -11,6 +11,7 @@
 
 mod common;
 
+use actix_cloud_extra::Error;
 use actix_cloud_extra::HyUuid;
 use actix_cloud_extra::api::{
     Condition, IDsReq, IntoExpr, OptionIDsReq, PaginationParam, TimeParam,
@@ -20,7 +21,7 @@ use common::{UserRepo, count_row, sample, users};
 use futures::executor::block_on;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::ColumnRef;
-use sea_orm::{DbBackend, MockDatabase, MockExecResult, QueryTrait, Value};
+use sea_orm::{DbBackend, DbErr, MockDatabase, MockExecResult, QueryTrait, Value};
 
 // ---- SQL injection / parameterization ----
 
@@ -235,8 +236,11 @@ fn safety_select_page_zero_size_returns_err() {
     let db = MockDatabase::new(DbBackend::Sqlite).into_connection();
     let cond = Condition::new_all().add_page(PaginationParam { page: 1, size: 0 });
 
-    let result = block_on(cond.select_page(users::Entity::find(), &db));
-    assert!(result.is_err(), "size=0 should return Err");
+    let err = block_on(cond.select_page(users::Entity::find(), &db)).unwrap_err();
+    assert!(
+        matches!(err, Error::PaginationSize),
+        "size=0 should return Err"
+    );
 }
 
 #[test]
@@ -249,8 +253,11 @@ fn safety_select_page_u64_max_page_returns_err() {
         size: 100,
     });
 
-    let result = block_on(cond.select_page(users::Entity::find(), &db));
-    assert!(result.is_err(), "overflowing page should return Err");
+    let err = block_on(cond.select_page(users::Entity::find(), &db)).unwrap_err();
+    assert!(
+        matches!(err, Error::PaginationOverflow),
+        "overflowing page should return Err"
+    );
 }
 
 #[test]
@@ -258,7 +265,30 @@ fn safety_repo_find_rejects_invalid_pagination() {
     // The generated `find` goes through the same safety checks.
     let db = MockDatabase::new(DbBackend::Sqlite).into_connection();
     let cond = Condition::new_all().add_page(PaginationParam { page: 1, size: 0 });
-    assert!(block_on(UserRepo::find(&db, cond)).is_err());
+    let err = block_on(UserRepo::find(&db, cond)).unwrap_err();
+    assert!(matches!(err, Error::PaginationSize));
+}
+
+#[test]
+fn safety_macro_find_by_id_propagates_db_error() {
+    // The generated `find_by_id` converts `DbErr` through the crate error.
+    let db = MockDatabase::new(DbBackend::Sqlite)
+        .append_query_errors([DbErr::Custom("boom".to_owned())])
+        .into_connection();
+
+    let err = block_on(UserRepo::find_by_id(&db, &HyUuid::new())).unwrap_err();
+    assert!(matches!(err, Error::Db(_)));
+}
+
+#[test]
+fn safety_macro_count_propagates_db_error() {
+    // The generated `count` uses `?`, which converts `DbErr` through `From`.
+    let db = MockDatabase::new(DbBackend::Sqlite)
+        .append_query_errors([DbErr::Custom("boom".to_owned())])
+        .into_connection();
+
+    let err = block_on(UserRepo::count(&db, Condition::new_all())).unwrap_err();
+    assert!(matches!(err, Error::Db(_)));
 }
 
 #[test]

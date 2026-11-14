@@ -15,7 +15,7 @@
 
 | Feature | 默认 | 启用的依赖 | 说明 |
 | --- | --- | --- | --- |
-| `hyuuid` | 是 | `uuid`、`anyhow`、`serde` | `HyUuid`：严格使用连字符格式的 UUID v4 ID 类型 |
+| `hyuuid` | 是 | `uuid`、`thiserror`、`serde` | `HyUuid`：严格使用连字符格式的 UUID v4 ID 类型，以及 crate 级 `Error` / `Result` |
 | `api` | 是 | `hyuuid`、`utils`、`validator` | 分页、`Condition` 与常用请求载荷 |
 | `entity` | 是 | `seaorm`、`serde`、`serde_json` | `VecString` 与 `DefaultColumnTrait` |
 | `logger` | 是 | `actix-cloud/logger` | `start_logger` 默认日志器 |
@@ -100,6 +100,22 @@ let rsp = PageData::new((data, total));
 
 `IDsReq` / `OptionIDsReq` 携带 ID 列表，并通过 `validate()` 拒绝重复项。请在请求层限制列表长度以及排序/搜索输入的长度。
 
+### 错误处理
+
+所有可失败 API 都返回 `actix_cloud_extra::Result<T>`，即 `Result<T, actix_cloud_extra::Error>` 的别名。`Error` 是非穷尽的 `thiserror` 枚举：包裹 `uuid::Error`，在启用 `seaorm` 时还会包裹 `sea_orm::DbErr` 以及分页错误。它实现了 `std::error::Error + Send + Sync`，因此兼容 actix-cloud 的 `ResponseError`，在仍然返回 `anyhow::Result` 的 handler 中也可以直接 `?` / `.context()`。
+
+```rust
+use actix_cloud_extra::Error;
+
+fn classify(err: Error) {
+    match err {
+        Error::UuidLength | Error::UuidVersion | Error::Uuid(_) => { /* ID 非法 */ }
+        Error::Db(_) => { /* 数据库错误 */ }
+        _ => { /* 分页错误及未来新增变体 */ }
+    }
+}
+```
+
 ### entity
 
 SeaORM 实体辅助：
@@ -180,12 +196,11 @@ pub struct UserRsp {
 }
 ```
 
-宏展开后的代码会引用 `sea_orm`、`chrono`、`async-trait` 和 `anyhow`，因此这些必须是你的 crate 的直接依赖（同时需要在使用宏的模块中 `use sea_orm::entity::prelude::*;`，以提供 `DateTimeUtc`、`EntityTrait` 和 `PaginatorTrait`）：
+宏展开后的代码会引用 `sea_orm`、`chrono`、`async-trait` 和 `actix_cloud_extra::Result`（crate 自身的错误类型），因此 `sea_orm`、`chrono` 和 `async-trait` 必须是你的 crate 的直接依赖；不再需要 `anyhow` / `thiserror`（同时需要在使用宏的模块中 `use sea_orm::entity::prelude::*;`，以提供 `DateTimeUtc`、`EntityTrait` 和 `PaginatorTrait`）：
 
 ```toml
 [dependencies]
 actix-cloud-extra = { version = "0.1", features = ["entity", "macros", "seaorm"] }
-anyhow = "1"
 async-trait = "0.1"
 chrono = "0.4"
 sea-orm = "2"

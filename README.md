@@ -15,7 +15,7 @@ Every module is behind a cargo feature, so you can compile only what you use.
 
 | Feature | Default | Enables | Description |
 | --- | --- | --- | --- |
-| `hyuuid` | yes | `uuid`, `anyhow`, `serde` | `HyUuid`, a strictly hyphenated UUID v4 ID type |
+| `hyuuid` | yes | `uuid`, `thiserror`, `serde` | `HyUuid`, a strictly hyphenated UUID v4 ID type, plus the crate-wide `Error` / `Result` |
 | `api` | yes | `hyuuid`, `utils`, `validator` | Pagination, `Condition`, and common request payloads |
 | `entity` | yes | `seaorm`, `serde`, `serde_json` | `VecString` and `DefaultColumnTrait` |
 | `logger` | yes | `actix-cloud/logger` | `start_logger`, a default logger |
@@ -100,6 +100,22 @@ Sort names not present in the whitelist are silently ignored, so `parse_sort_opt
 
 `IDsReq` / `OptionIDsReq` carry a list of IDs and reject duplicates via `validate()`. Cap the list length and the sort/search input at the request layer.
 
+### Errors
+
+All fallible APIs return `actix_cloud_extra::Result<T>`, an alias for `Result<T, actix_cloud_extra::Error>`. `Error` is a non-exhaustive `thiserror` enum: it wraps `uuid::Error`, and with `seaorm` also `sea_orm::DbErr` plus the pagination errors. It implements `std::error::Error + Send + Sync`, so it works with actix-cloud's `ResponseError` and with `?` / `.context()` in handlers that still return `anyhow::Result`.
+
+```rust
+use actix_cloud_extra::Error;
+
+fn classify(err: Error) {
+    match err {
+        Error::UuidLength | Error::UuidVersion | Error::Uuid(_) => { /* invalid ID */ }
+        Error::Db(_) => { /* database failure */ }
+        _ => { /* pagination errors and future variants */ }
+    }
+}
+```
+
 ### entity
 
 SeaORM entity helpers:
@@ -180,12 +196,11 @@ pub struct UserRsp {
 }
 ```
 
-The macros expand to code that references `sea_orm`, `chrono`, `async-trait`, and `anyhow`, so those must be direct dependencies of your crate (and `sea_orm::entity::prelude::*` must be in scope for `DateTimeUtc`, `EntityTrait`, and `PaginatorTrait`):
+The macros expand to code that references `sea_orm`, `chrono`, `async-trait`, and `actix_cloud_extra::Result` (the crate's own error type), so `sea_orm`, `chrono`, and `async-trait` must be direct dependencies of your crate; `anyhow` / `thiserror` are not needed (and `sea_orm::entity::prelude::*` must be in scope for `DateTimeUtc`, `EntityTrait`, and `PaginatorTrait`):
 
 ```toml
 [dependencies]
 actix-cloud-extra = { version = "0.1", features = ["entity", "macros", "seaorm"] }
-anyhow = "1"
 async-trait = "0.1"
 chrono = "0.4"
 sea-orm = "2"
