@@ -1,43 +1,108 @@
-name: Check
+name: Release
 
+# Release only from tags; configure a protected `release` environment with
+# required reviewers before enabling publishing.
 on:
-  workflow_dispatch:
   push:
     tags:
       - "v*"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
 jobs:
-  check:
-    name: Check code
+  verify:
+    name: Verify release
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
-      - name: Cache cargo & target directories
-        uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+      - name: Verify tag, versions, and existing releases
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          metadata="$(cargo metadata --no-deps --format-version 1)"
+          main_version="$(jq -r '.packages[] | select(.name == "actix-cloud-extra") | .version' <<<"$metadata")"
+          macros_version="$(jq -r '.packages[] | select(.name == "actix-cloud-extra-macros") | .version' <<<"$metadata")"
+          dep_req="$(jq -r '.packages[] | select(.name == "actix-cloud-extra") | .dependencies[] | select(.name == "actix-cloud-extra-macros") | .req' <<<"$metadata")"
+          dep_version="${dep_req#^}"
+          dep_version="${dep_version#~}"
+          dep_version="${dep_version#=}"
+          echo "tag=$tag_version main=$main_version macros=$macros_version dep=$dep_version"
+          test "$tag_version" = "$main_version"
+          test "$tag_version" = "$macros_version"
+          test "$tag_version" = "$dep_version"
+          for crate in actix-cloud-extra-macros actix-cloud-extra; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "https://crates.io/api/v1/crates/$crate/$tag_version")"
+            if [ "$code" = "200" ]; then
+              echo "::error::$crate $tag_version is already published"
+              exit 1
+            fi
+          done
       - name: Check
         run: make check
-      - name: Run tests
+      - name: Test
         run: make test
 
   publish:
-    needs: check
-    name: Publish crate
+    name: Publish crates
+    needs: verify
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - name: Publish macros crate
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish -p actix-cloud-extra-macros
+      - name: Wait for the macros crate on the index
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          for attempt in $(seq 1 30); do
+            if cargo info "actix-cloud-extra-macros@$version" >/dev/null 2>&1; then
+              echo "actix-cloud-extra-macros $version is available"
+              exit 0
+            fi
+            echo "waiting for the crates.io index ($attempt/30)..."
+            sleep 10
+          done
+          echo "::error::timed out waiting for actix-cloud-extra-macros $version"
+          exit 1
+      - name: Publish main crate
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish -p actix-cloud-extra
+
+  github-release:
+    name: Create GitHub release
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
-      - name: Login
-        run: cargo login ${{ secrets.CRATES_IO_TOKEN }}
-      - name: Push to crate.io
-        run: |
-          cd actix-cloud-extra-macros
-          cargo publish --no-verify || true
-          cd -
-          cd actix-cloud-extra
-          cargo publish --no-verify || true
-          cd -
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
         with:
           draft: true
+          generate_release_notes: true

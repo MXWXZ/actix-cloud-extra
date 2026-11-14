@@ -48,7 +48,7 @@ let id = HyUuid::parse("550e8400-e29b-41d4-a716-446655440000")?; // strictly UUI
 assert_eq!(id.to_string(), "550e8400-e29b-41d4-a716-446655440000");
 ```
 
-JSON serialization only accepts the 36-char hyphenated form; other textual formats (simple, braced, URN) and other UUID versions are rejected.
+JSON serialization only accepts the 36-char hyphenated form; other textual formats (simple, braced, URN) and non-v4 versions are rejected. The nil UUID is accepted so `Default` / `nil()` can roundtrip through serde.
 
 ### api
 
@@ -59,6 +59,8 @@ API helpers for pagination and dynamic queries.
 ```json
 { "page": 2, "size": 20 }
 ```
+
+Request-derived parameters should be validated. `select_page` additionally rejects `size == 0` and offsets that would overflow `u64` with an error instead of panicking.
 
 `Condition` is the query hub: build filters, sort and pagination fluently, then run it.
 
@@ -81,7 +83,7 @@ let (data, total) = cond.select_page(user::Entity::find(), &db).await?;
 let rsp = PageData::new((data, total));
 ```
 
-Sort names not present in the whitelist are silently ignored, so `parse_sort_option` is safe to feed straight from user input. Use `Condition::add_time` with `TimeParam` (deserialized from datetime strings like `2024-01-01T00:00:00`, `T` separator required) to filter on creation/update time ranges, see [entity](#entity). `IDsReq` / `OptionIDsReq` carry a list of IDs and reject duplicates via validation.
+Sort names not present in the whitelist are silently ignored, so `parse_sort_option` is safe to feed straight from user input. Use `Condition::add_time` with `TimeParam` (deserialized from RFC 3339 strings like `2024-01-01T00:00:00Z`; a timezone offset is required) to filter on creation/update time ranges, see [entity](#entity). `IDsReq` / `OptionIDsReq` carry a list of IDs and reject duplicates via validation; cap the list length at the request layer.
 
 ### entity
 
@@ -116,7 +118,7 @@ let (logger, _guard) = start_logger(
 );
 ```
 
-Returns `(None, None)` when `enable` is `false`; the guard stops logging when dropped.
+Returns `(None, None)` when `enable` is `false`; the guard stops logging when dropped. Call `start_logger` once at startup: it installs a global tracing subscriber and panics if one is already installed. The transformer does not escape control characters in target/filename, so keep untrusted data out of those fields.
 
 ### seaorm
 
@@ -175,6 +177,8 @@ assert_eq!("a%b_c\\d".like_escape(), "a\\%b\\_c\\\\d");
 let url = DataUrl::new(bytes).unwrap().encode();    // data:image/png;base64,...
 let data = DataUrl::decode(&url).unwrap();
 ```
+
+`DataUrl::decode` ignores the declared prefix and infers the MIME type from the bytes; treat it as an untrusted hint and bound the input size at the request layer. `is_hex` returns `false` for an empty string.
 
 ## License
 

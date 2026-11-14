@@ -69,6 +69,11 @@ name = "macros_entity"
 path = "tests/macros_entity.rs"
 required-features = ["api", "entity", "hyuuid", "macros", "seaorm"]
 
+[[test]]
+name = "security"
+path = "tests/security.rs"
+required-features = ["api", "entity", "hyuuid", "macros", "seaorm"]
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

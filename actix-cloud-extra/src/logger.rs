@@ -3,6 +3,11 @@
 //! The output is normalized for readability:
 //! - Target: only keeps the first path before `::` (e.g. `project::module1::module2` => `project`).
 //! - Filename: only keeps the path starting from the last `src` (e.g. `/a/b/src/c/d/main.rs` => `src/c/d/main.rs`).
+//!
+//! Security note: `target` and `filename` are passed through without escaping
+//! control characters. Keep untrusted data out of those fields (including the
+//! reserved `_filename` override); otherwise a newline or terminal escape can
+//! forge log lines or manipulate the terminal.
 
 use std::path::PathBuf;
 
@@ -51,6 +56,14 @@ fn transformer(mut item: LogItem) -> LogItem {
 ///
 /// Returns the logger and a guard which stops logging when dropped; both are
 /// `Some` on success and `None` when the logger is disabled.
+///
+/// # Panics
+/// Installs a global tracing subscriber and panics if one is already installed
+/// (for example when called twice or when another library initialized
+/// `tracing`). Call it exactly once during startup.
+///
+/// The transformer does not escape control characters in `target`/`filename`;
+/// keep untrusted data out of those fields (see the module docs).
 pub fn start_logger(
     enable: bool,
     json: bool,
@@ -190,5 +203,17 @@ mod tests {
         // `Path::iter()` yields the root, so an absolute path without `src`
         // survives the rebuild unchanged.
         assert_eq!(filename_of("app", "/a/b/main.rs"), "/a/b/main.rs");
+    }
+
+    // ---- security ----
+
+    #[test]
+    fn logging_transformer_preserves_printable_metadata() {
+        let out = transformer(item("app::db::query", Some("src/main.rs")));
+        assert_eq!(out.target, "app");
+        assert_eq!(out.filename.as_deref(), Some("src/main.rs"));
+
+        let out = transformer(item("app", Some("src/中文.rs")));
+        assert_eq!(out.filename.as_deref(), Some("src/中文.rs"));
     }
 }

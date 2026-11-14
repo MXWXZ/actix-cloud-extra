@@ -11,6 +11,14 @@ use syn::{Ident, ImplItem, ItemImpl, parse_macro_input, parse_quote};
 /// name are kept untouched. The attribute argument is the entity module path,
 /// whose `Entity`/`Model` types are used.
 ///
+/// `find` applies the `Condition` as-is: without a page attached it loads the
+/// whole result set, so request-facing callers should always attach a
+/// `PaginationParam` and enforce their own upper bound. `delete_all` is
+/// unfiltered and must not be exposed without authorization scoping.
+///
+/// The generated methods perform no tenant/ownership checks; authorize
+/// `find_by_id`, `delete`, and any filtered query before calling them.
+///
 /// # Examples
 /// ```ignore
 /// pub struct UserRepo;
@@ -116,6 +124,9 @@ pub fn default_repo(attr: TokenStream, input: TokenStream) -> TokenStream {
 /// `updated_at` is refreshed. Also implements
 /// `actix_cloud_extra::entity::DefaultColumnTrait` for `Column`.
 ///
+/// On update, a `created_at` supplied in the ActiveModel is written as-is; do
+/// not map untrusted request data into timestamp fields.
+///
 /// # Examples
 /// ```ignore
 /// pub struct Model {
@@ -164,6 +175,9 @@ pub fn entity_timestamp(_: TokenStream, input: TokenStream) -> TokenStream {
 /// Automatically generate `id` on create, only when the field is not already
 /// set.
 ///
+/// A preset `id` (including nil) is preserved; never map untrusted request
+/// data into `id`.
+///
 /// # Examples
 /// ```ignore
 /// pub struct Model {
@@ -200,6 +214,9 @@ pub fn entity_id(attr: TokenStream, input: TokenStream) -> TokenStream {
 /// block (see the example), and `async_trait` must be available as a
 /// dependency of the crate using this macro.
 ///
+/// See `entity_id` and `entity_timestamp` for the DTO safety notes (preset IDs
+/// and `created_at` from untrusted input are preserved).
+///
 /// # Examples
 /// ```ignore
 /// #[entity_id(rand_i64())]
@@ -234,6 +251,9 @@ pub fn entity_behavior(_: TokenStream, input: TokenStream) -> TokenStream {
 #[cfg(feature = "seaorm")]
 /// Implement `From` for entity to partial entity.
 /// The fields should be exactly the same.
+///
+/// The conversion is a straight field copy with no sanitization; authorize the
+/// source model and filter fields before exposing the result.
 ///
 /// # Examples
 /// ```ignore

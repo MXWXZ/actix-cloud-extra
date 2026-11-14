@@ -1,7 +1,7 @@
 SHELL = /bin/bash
 
 .ONESHELL:
-.PHONY: check help doc test
+.PHONY: check help doc test test-features
 
 all: help
 
@@ -16,7 +16,14 @@ doc:
 
 ## test: Run tests.
 test:
-	@cargo test --all-features 
+	@cargo test --all-features
+
+## test-features: Test every feature individually.
+test-features:
+	@cargo test --no-default-features
+	@for f in hyuuid utils api entity logger seaorm macros; do \
+		cargo test --no-default-features --features "$$f"; \
+	done
 
 ## help: Show this help.
 help: Makefile

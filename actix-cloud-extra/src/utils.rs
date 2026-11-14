@@ -2,7 +2,7 @@ use base64::{Engine as _, prelude::BASE64_STANDARD};
 use infer::Type;
 
 pub trait StringUtil {
-    /// Check whether given `s` is a hex string.
+    /// Check whether the string is a non-empty ASCII hex string.
     fn is_hex(&self) -> bool;
 
     /// Escape `like` SQL in `s`.
@@ -14,9 +14,10 @@ impl<S> StringUtil for S
 where
     S: AsRef<str>,
 {
-    /// Check whether given string is a hex string.
+    /// Check whether the string is a non-empty ASCII hex string.
     fn is_hex(&self) -> bool {
-        self.as_ref().chars().all(|c| c.is_ascii_hexdigit())
+        let s = self.as_ref();
+        !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit())
     }
 
     /// Escape `like` SQL in string.
@@ -27,17 +28,35 @@ where
     }
 }
 
+/// A decoded data URL: raw bytes plus the MIME type inferred from them.
+///
+/// No size limiting or MIME validation is performed. Callers handling
+/// untrusted input must enforce a maximum encoded/decoded length and apply a
+/// MIME allowlist before serving the content; the inferred [`Type`] is only a
+/// hint.
 pub struct DataUrl {
     pub data: Vec<u8>,
     pub mime: Type,
 }
 
 impl DataUrl {
+    /// Encode as `data:{mime};base64,{payload}`.
     pub fn encode(&self) -> String {
         let data = BASE64_STANDARD.encode(&self.data);
         format!("data:{};base64,{data}", self.mime)
     }
 
+    /// Decode a data URL.
+    ///
+    /// The prefix before the comma is ignored; in particular `data:` and
+    /// `;base64` are not validated, so a successful decode does not prove the
+    /// input was a data URL. The returned MIME type is inferred from the
+    /// decoded bytes and should be treated as an untrusted hint, not as the
+    /// declared type.
+    ///
+    /// The input is not size-limited. When handling untrusted data, enforce a
+    /// maximum length before calling this method: decoding allocates memory
+    /// proportional to the payload size.
     pub fn decode<S: AsRef<str>>(data: S) -> Option<Self> {
         let data: Vec<_> = data.as_ref().split(',').collect();
         if data.len() == 2 {
@@ -47,6 +66,10 @@ impl DataUrl {
         }
     }
 
+    /// Infer the MIME type from `data`, returning `None` when it is not
+    /// recognized.
+    ///
+    /// No size limit is applied; the caller owns any input-size policy.
     pub fn new(data: Vec<u8>) -> Option<Self> {
         let mime = infer::get(&data);
         mime.map(|mime| Self { data, mime })
@@ -68,7 +91,11 @@ mod tests {
         assert!("0123456789abcdefABCDEF".is_hex());
         assert!("abcdef".is_hex());
         assert!("ABCDEF".is_hex());
-        assert!("".is_hex()); // vacuously true
+    }
+
+    #[test]
+    fn boundary_is_hex_rejects_empty() {
+        assert!(!"".is_hex());
     }
 
     #[test]

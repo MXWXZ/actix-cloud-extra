@@ -11,12 +11,13 @@ Rust workspace providing extra tools (helpers, proc macros) for [Actix Cloud](ht
 
 ## Commands
 
-- `make check` — clippy (`--all-features -D clippy::all`) + `cargo fmt --check`. CI gate.
+- `make check` — clippy (`--all-features --all-targets -D clippy::all`) + `cargo fmt --check`. CI gate.
 - `make test` — `cargo test --all-features`
+- `make test-features` — run tests with no features and each feature individually
 - Single test: `cargo test --all-features hyuuid::tests::parse_ok` (unit tests are inline `#[cfg(test)]` modules in the feature modules; macro tests live in `actix-cloud-extra/tests/macros_repo.rs` and `macros_entity.rs`)
 - `make doc` — build docs on **nightly** with `--cfg docsrs` (matches docs.rs config)
 
-Because everything is feature-gated, `--all-features` builds can pass while a single feature fails to build alone. When changing feature wiring or cfg gates, verify with e.g. `cargo check --no-default-features` and per-feature `cargo check -F <feature>`.
+Because everything is feature-gated, `--all-features` builds can pass while a single feature fails to build alone. When changing feature wiring or cfg gates, verify with `make test-features` (or `cargo check --no-default-features` and per-feature `cargo check -F <feature>`).
 
 ## Architecture
 
@@ -38,4 +39,12 @@ Wrapped `uuid::Uuid` serialized/deserialized strictly as a 36-char hyphenated st
 
 ## Release
 
-CI (`.github/workflows/release.yml`) triggers on tags `v*`: runs `make check` + `make test`, then publishes **the macros crate first**, then the main crate, and creates a draft GitHub release. Bump versions manually in both `Cargo.toml`s before tagging (commit style: `v0.1.3`).
+CI (`.github/workflows/ci.yml`) runs on branches/PRs: check+test, the per-feature matrix, and MSRV 1.94.
+
+Release (`.github/workflows/release.yml`) runs only on tags `v*` and:
+1. verifies the tag equals both crate versions and the macros dependency version, and that neither version is already published;
+2. runs `make check` + `make test` as the release gate;
+3. publishes the macros crate, waits for the crates.io index, then publishes the main crate — fail-fast, no `--no-verify`, token scoped to each publish step;
+4. creates a draft GitHub release in a separate job with `contents: write`.
+
+Bump versions manually in both `Cargo.toml`s and the macros dependency before tagging (commit style: `v0.1.3`). The publish job expects a protected `release` environment with required reviewers.
