@@ -1,3 +1,11 @@
 [workspace]
 members = ["actix-cloud-extra", "actix-cloud-extra-macros"]
-resolver = "2"
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+# sea-orm 2.0 requires 1.94, which is the highest minimum among our dependencies.
+rust-version = "1.94"
+authors = ["MXWXZ <matrixwxz@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/MXWXZ/actix-cloud-extra"

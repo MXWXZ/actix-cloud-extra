@@ -57,49 +57,128 @@ impl DataUrl {
 mod tests {
     use super::*;
 
+    fn png() -> Vec<u8> {
+        vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+    }
+
+    // ---- normal path ----
+
     #[test]
-    fn is_hex_valid() {
+    fn normal_is_hex_mixed_case() {
         assert!("0123456789abcdefABCDEF".is_hex());
-        assert!("".is_hex());
+        assert!("abcdef".is_hex());
+        assert!("ABCDEF".is_hex());
+        assert!("".is_hex()); // vacuously true
     }
 
     #[test]
-    fn is_hex_invalid() {
-        assert!(!"0x123".is_hex());
-        assert!(!"hello".is_hex());
-        assert!(!"12g4".is_hex());
-    }
-
-    #[test]
-    fn like_escape_basic() {
+    fn normal_like_escape_plain() {
         assert_eq!("plain".like_escape(), "plain");
     }
 
     #[test]
-    fn like_escape_special() {
+    fn normal_like_escape_specials() {
         assert_eq!("a%b_c\\d".like_escape(), "a\\%b\\_c\\\\d");
     }
 
     #[test]
-    fn like_escape_backslash_first() {
-        // `\` must be escaped first so it does not double-escape later inserts.
-        assert_eq!("%\\".like_escape(), "\\%\\\\");
-    }
-
-    #[test]
-    fn dataurl_roundtrip() {
-        // 8-byte PNG signature is enough for `infer` to detect image/png.
-        let png = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
-        let url = DataUrl::new(png.clone()).unwrap();
+    fn normal_dataurl_png_roundtrip() {
+        let url = DataUrl::new(png()).unwrap();
         let encoded = url.encode();
         let decoded = DataUrl::decode(&encoded).unwrap();
-        assert_eq!(decoded.data, png);
+        assert_eq!(decoded.data, png());
         assert_eq!(decoded.mime.mime_type(), "image/png");
     }
 
     #[test]
-    fn dataurl_decode_bad() {
+    fn normal_dataurl_encode_exact() {
+        let url = DataUrl::new(png()).unwrap();
+        assert_eq!(url.encode(), "data:image/png;base64,iVBORw0KGgo=");
+    }
+
+    #[test]
+    fn normal_dataurl_gif_detection() {
+        let url = DataUrl::new(b"GIF89a".to_vec()).unwrap();
+        assert_eq!(url.mime.mime_type(), "image/gif");
+    }
+
+    #[test]
+    fn normal_dataurl_decode_ignores_declared_mime() {
+        // The prefix before the comma is never validated; the MIME type comes
+        // from the decoded bytes.
+        let declared = DataUrl::decode("data:text/plain;base64,iVBORw0KGgo=").unwrap();
+        assert_eq!(declared.mime.mime_type(), "image/png");
+        let garbage = DataUrl::decode("whatever,iVBORw0KGgo=").unwrap();
+        assert_eq!(garbage.mime.mime_type(), "image/png");
+    }
+
+    // ---- boundary ----
+
+    #[test]
+    fn boundary_is_hex_rejects_prefix_whitespace_unicode() {
+        assert!(!"0x123".is_hex());
+        assert!(!" 12".is_hex());
+        assert!(!"12\n".is_hex());
+        assert!(!"\u{FF11}\u{FF12}".is_hex()); // fullwidth digits
+        assert!(!"é".is_hex());
+        assert!(!"+1".is_hex());
+    }
+
+    #[test]
+    fn boundary_like_escape_empty_and_specials_only() {
+        assert_eq!("".like_escape(), "");
+        assert_eq!("%_\\".like_escape(), "\\%\\_\\\\");
+    }
+
+    #[test]
+    fn boundary_like_escape_consecutive_and_already_escaped() {
+        assert_eq!("%%__".like_escape(), "\\%\\%\\_\\_");
+        // Escaping is not idempotent: input backslashes are escaped too.
+        assert_eq!("\\%".like_escape(), "\\\\\\%");
+    }
+
+    #[test]
+    fn boundary_dataurl_decode_malformed() {
         assert!(DataUrl::decode("no-comma-here").is_none());
+        assert!(DataUrl::decode("a,b,c").is_none());
+        assert!(DataUrl::decode("data:image/png;base64,!!!!").is_none());
+        assert!(DataUrl::decode("data:image/png;base64,--__").is_none());
+        assert!(DataUrl::decode("data:image/png;base64,iVBOR w0KGgo=").is_none());
+        assert!(DataUrl::decode(",").is_none());
+    }
+
+    #[test]
+    fn boundary_dataurl_decode_unknown_or_empty_payload() {
+        // Valid base64, but the bytes have no detectable MIME.
+        assert!(DataUrl::decode("x,AQID").is_none());
+        assert!(DataUrl::decode("data:image/png;base64,").is_none());
+    }
+
+    // ---- extreme ----
+
+    #[test]
+    fn extreme_is_hex_long_input() {
+        assert!("a".repeat(10_000).is_hex());
+        let bad = format!("{}g", "a".repeat(9_999));
+        assert!(!bad.is_hex());
+    }
+
+    #[test]
+    fn extreme_like_escape_backslash_first_and_unicode() {
+        // `\` must be escaped first so it does not double-escape later inserts.
+        assert_eq!("%\\".like_escape(), "\\%\\\\");
+        assert_eq!("中文%\\_".like_escape(), "中文\\%\\\\\\_");
+        assert_eq!("\n\t".like_escape(), "\n\t");
+    }
+
+    #[test]
+    fn extreme_dataurl_large_roundtrip() {
+        let mut data = png();
+        data.resize(64 * 1024, 0xAB);
+        let url = DataUrl::new(data.clone()).unwrap();
+        let decoded = DataUrl::decode(url.encode()).unwrap();
+        assert_eq!(decoded.data, data);
+        assert_eq!(decoded.mime.mime_type(), "image/png");
     }
 
     #[test]

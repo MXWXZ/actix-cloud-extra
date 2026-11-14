@@ -13,7 +13,7 @@ Rust workspace providing extra tools (helpers, proc macros) for [Actix Cloud](ht
 
 - `make check` — clippy (`--all-features -D clippy::all`) + `cargo fmt --check`. CI gate.
 - `make test` — `cargo test --all-features`
-- Single test: `cargo test --all-features hyuuid::tests::parse_ok` (tests are inline `#[cfg(test)]` modules in `hyuuid.rs` and `utils.rs`)
+- Single test: `cargo test --all-features hyuuid::tests::parse_ok` (unit tests are inline `#[cfg(test)]` modules in the feature modules; macro tests live in `actix-cloud-extra/tests/macros_repo.rs` and `macros_entity.rs`)
 - `make doc` — build docs on **nightly** with `--cfg docsrs` (matches docs.rs config)
 
 Because everything is feature-gated, `--all-features` builds can pass while a single feature fails to build alone. When changing feature wiring or cfg gates, verify with e.g. `cargo check --no-default-features` and per-feature `cargo check -F <feature>`.

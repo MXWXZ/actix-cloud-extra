@@ -12,8 +12,10 @@ use uuid::Uuid;
 /// hyphenated string.
 ///
 /// [`Default`] returns the nil UUID; use [`HyUuid::new`] for a random v4 UUID.
-/// Via `DeriveValueType` it can be used directly as a SeaORM column type.
-#[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Default, DeriveValueType)]
+/// With the `seaorm` feature, `DeriveValueType` also makes it usable directly
+/// as a SeaORM column type.
+#[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "seaorm", derive(DeriveValueType))]
 pub struct HyUuid(pub Uuid);
 
 impl Display for HyUuid {
@@ -40,15 +42,18 @@ impl HyUuid {
 
     /// Parse a 36-char hyphenated UUID v4 string (hex is case-insensitive).
     ///
+    /// The nil UUID is accepted so [`HyUuid::nil`] / [`Default`] can roundtrip
+    /// through serde; every other value must be a version 4 UUID.
+    ///
     /// # Errors
-    /// Will return `Err` when `str` is not a 36-char hyphenated UUID, or not
-    /// version 4.
+    /// Will return `Err` when `str` is not a 36-char hyphenated UUID, or is
+    /// neither nil nor a version 4 UUID.
     pub fn parse(str: &str) -> Result<Self> {
         if str.len() != 36 {
             bail!("uuid error: uuid must be 36 bytes");
         }
         let u = Uuid::parse_str(str)?;
-        if u.get_version_num() != 4 {
+        if !u.is_nil() && u.get_version_num() != 4 {
             bail!("uuid error: only uuid v4 is allowed");
         }
         Ok(Self(u))
@@ -100,7 +105,11 @@ impl<'de> Deserialize<'de> for HyUuid {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
+
+    // ---- normal path ----
 
     #[test]
     fn nil() {
@@ -110,9 +119,39 @@ mod tests {
     }
 
     #[test]
+    fn normal_nil_and_default() {
+        assert_eq!(HyUuid::default(), HyUuid::nil());
+        assert!(HyUuid::default().is_nil());
+    }
+
+    #[test]
+    fn normal_nil_roundtrip() {
+        let nil = HyUuid::nil();
+        assert_eq!(HyUuid::parse(&nil.to_string()).unwrap(), nil);
+        let s = serde_json::to_string(&nil).unwrap();
+        assert_eq!(serde_json::from_str::<HyUuid>(&s).unwrap(), nil);
+    }
+
+    #[test]
     fn new_not_nil() {
         let a = HyUuid::new();
         assert!(!a.is_nil());
+    }
+
+    #[test]
+    fn normal_new_is_v4_hyphenated() {
+        let s = HyUuid::new().to_string();
+        assert_eq!(s.len(), 36);
+        for pos in [8, 13, 18, 23] {
+            assert_eq!(&s[pos..pos + 1], "-", "expected hyphen at byte {pos}");
+        }
+        assert!(
+            s.chars()
+                .filter(|c| *c != '-')
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        );
+        let u = HyUuid::new();
+        assert_eq!(u.0.get_version_num(), 4);
     }
 
     #[test]
@@ -123,9 +162,64 @@ mod tests {
     }
 
     #[test]
+    fn normal_parse_uppercase_normalizes() {
+        let u = HyUuid::parse("550E8400-E29B-41D4-A716-446655440000").unwrap();
+        assert_eq!(u.to_string(), "550e8400-e29b-41d4-a716-446655440000");
+    }
+
+    #[test]
+    fn serde_roundtrip() {
+        let u = HyUuid::new();
+        let s = serde_json::to_string(&u).unwrap();
+        let back: HyUuid = serde_json::from_str(&s).unwrap();
+        assert_eq!(u, back);
+    }
+
+    #[test]
+    fn normal_serde_is_lowercase_string() {
+        let u = HyUuid::parse("550E8400-E29B-41D4-A716-446655440000").unwrap();
+        let s = serde_json::to_string(&u).unwrap();
+        assert_eq!(s, "\"550e8400-e29b-41d4-a716-446655440000\"");
+    }
+
+    #[cfg(feature = "seaorm")]
+    #[test]
+    fn normal_seaorm_value_roundtrip() {
+        use sea_orm::sea_query::ValueType;
+
+        let id = HyUuid::new();
+        let value: sea_orm::Value = id.into();
+        assert_eq!(value, sea_orm::Value::Uuid(Some(id.0)));
+        let back = <HyUuid as ValueType>::try_from(value).unwrap();
+        assert_eq!(back, id);
+    }
+
+    #[cfg(feature = "seaorm")]
+    #[test]
+    fn normal_seaorm_metadata() {
+        use sea_orm::sea_query::{ArrayType, ColumnType, Nullable, Value, ValueType};
+
+        assert_eq!(<HyUuid as ValueType>::type_name(), "HyUuid");
+        assert_eq!(<HyUuid as ValueType>::array_type(), ArrayType::Uuid);
+        assert_eq!(<HyUuid as ValueType>::column_type(), ColumnType::Uuid);
+        assert_eq!(<HyUuid as Nullable>::null(), Value::Uuid(None));
+    }
+
+    // ---- boundary ----
+
+    #[test]
     fn parse_wrong_len() {
         assert!(HyUuid::parse("550e8400-e29b-41d4-a716-44665544000").is_err());
         assert!(HyUuid::parse("550e8400-e29b-41d4-a716-4466554400000").is_err());
+    }
+
+    #[test]
+    fn boundary_parse_alternate_formats_rejected() {
+        // simple, braced and URN forms are valid for `uuid::Uuid`, but not for
+        // the strict 36-char contract here.
+        assert!(HyUuid::parse("550e8400e29b41d4a716446655440000").is_err());
+        assert!(HyUuid::parse("{550e8400-e29b-41d4-a716-446655440000}").is_err());
+        assert!(HyUuid::parse("urn:uuid:550e8400-e29b-41d4-a716-446655440000").is_err());
     }
 
     #[test]
@@ -141,15 +235,74 @@ mod tests {
     }
 
     #[test]
-    fn serde_roundtrip() {
-        let u = HyUuid::new();
-        let s = serde_json::to_string(&u).unwrap();
-        let back: HyUuid = serde_json::from_str(&s).unwrap();
-        assert_eq!(u, back);
+    fn boundary_parse_accepts_any_v4_variant() {
+        // Only the version nibble is validated; the variant is not.
+        let ncs = HyUuid::parse("550e8400-e29b-41d4-0716-446655440000").unwrap();
+        assert_eq!(ncs.0.get_version_num(), 4);
+        assert!(HyUuid::parse("550e8400-e29b-41d4-c716-446655440000").is_ok());
+    }
+
+    #[test]
+    fn boundary_serde_non_string_rejected() {
+        for input in [
+            "1",
+            "true",
+            "null",
+            "[]",
+            "{}",
+            "[\"550e8400-e29b-41d4-a716-446655440000\"]",
+        ] {
+            assert!(
+                serde_json::from_str::<HyUuid>(input).is_err(),
+                "input should be rejected: {input}"
+            );
+        }
     }
 
     #[test]
     fn serde_bad_input() {
         assert!(serde_json::from_str::<HyUuid>("\"not-a-uuid\"").is_err());
+    }
+
+    #[test]
+    fn boundary_serde_uppercase_accepted() {
+        let u: HyUuid = serde_json::from_str("\"550E8400-E29B-41D4-A716-446655440000\"").unwrap();
+        assert_eq!(u.to_string(), "550e8400-e29b-41d4-a716-446655440000");
+    }
+
+    // ---- extreme ----
+
+    #[test]
+    fn extreme_parse_empty_and_padded() {
+        assert!(HyUuid::parse("").is_err());
+        assert!(HyUuid::parse(" 550e8400-e29b-41d4-a716-446655440000").is_err());
+        assert!(HyUuid::parse("550e8400-e29b-41d4-a716-446655440000\n").is_err());
+    }
+
+    #[test]
+    fn extreme_parse_multibyte_input_does_not_panic() {
+        // 36 bytes but only 18 chars: the length gate passes, parsing fails.
+        let s = "é".repeat(18);
+        assert_eq!(s.len(), 36);
+        assert!(HyUuid::parse(&s).is_err());
+    }
+
+    #[cfg(feature = "seaorm")]
+    #[test]
+    fn extreme_seaorm_try_from_u64_errors() {
+        use sea_orm::{DbErr, TryFromU64};
+
+        for n in [0, 1, u64::MAX] {
+            assert!(matches!(
+                <HyUuid as TryFromU64>::try_from_u64(n),
+                Err(DbErr::ConvertFromU64("HyUuid"))
+            ));
+        }
+    }
+
+    #[test]
+    fn extreme_new_ids_unique() {
+        let ids: HashSet<_> = (0..1000).map(|_| HyUuid::new()).collect();
+        assert_eq!(ids.len(), 1000);
     }
 }

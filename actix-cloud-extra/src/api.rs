@@ -4,11 +4,10 @@
 use std::cmp;
 #[cfg(feature = "seaorm")]
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::hash::Hash;
 
-use actix_cloud::utils;
 use anyhow::Result;
-use derivative::Derivative;
 #[cfg(feature = "seaorm")]
 use sea_orm::{
     ExprTrait as _, FromQueryResult, Order, QueryOrder as _,
@@ -17,7 +16,6 @@ use sea_orm::{
     sea_query::{ColumnRef, LikeExpr, SimpleExpr},
 };
 use serde::{Deserialize, Serialize};
-use serde_inline_default::serde_inline_default;
 use validator::{Validate, ValidationError};
 
 use crate::HyUuid;
@@ -51,24 +49,30 @@ impl<T> PageData<T> {
 /// Both fields fall back to defaults (page 1, size 10) when missing. Call
 /// `validate` (from `validator`) to enforce `page >= 1` and
 /// `1 <= size <= 100`.
-#[serde_inline_default]
-#[derive(Derivative, Deserialize, Validate, Clone, Debug)]
-#[derivative(Default(new = "true"))]
+#[derive(Deserialize, Validate, Clone, Debug)]
+#[serde(default)]
 pub struct PaginationParam {
     /// 1-based page index.
     #[validate(range(min = 1))]
-    #[serde_inline_default(1)]
-    #[derivative(Default(value = "1"))]
     pub page: u64,
 
     /// Number of items per page, capped at 100 by validation.
     #[validate(range(min = 1, max = 100))]
-    #[serde_inline_default(10)]
-    #[derivative(Default(value = "10"))]
     pub size: u64,
 }
 
+impl Default for PaginationParam {
+    fn default() -> Self {
+        Self { page: 1, size: 10 }
+    }
+}
+
 impl PaginationParam {
+    /// New pagination params using the defaults (page 1, size 10).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// 0-based index of the first item of the page (saturating).
     pub fn left(&self) -> u64 {
         self.page.saturating_sub(1).saturating_mul(self.size)
@@ -234,11 +238,15 @@ impl Condition {
     ///
     /// `-`/`+` prefixes select descending/ascending order (no prefix =
     /// ascending); names not present in the `col` whitelist are silently
-    /// ignored, so this is safe to feed straight from user input.
+    /// ignored, so this is safe to feed straight from user input. Column refs
+    /// without a column name (such as `ColumnRef::Asterisk`) are ignored too.
     pub fn parse_sort(mut self, str: &str, col: Vec<ColumnRef>) -> Self {
         let mut allow: BTreeMap<String, ColumnRef> = col
             .into_iter()
-            .map(|x| (x.column().unwrap().to_string(), x))
+            .filter_map(|x| {
+                let name = x.column()?.to_string();
+                Some((name, x))
+            })
             .collect();
         for i in str.split(',') {
             let order = if i.starts_with('-') {
@@ -332,8 +340,9 @@ impl Condition {
 ///
 /// # Errors
 /// Will return `Err` when `x` has duplicate items.
-pub fn unique_validator<T: Eq + Hash>(x: &Vec<T>) -> Result<(), ValidationError> {
-    if utils::is_unique(x) {
+pub fn unique_validator<T: Eq + Hash>(x: &[T]) -> Result<(), ValidationError> {
+    let mut seen = HashSet::with_capacity(x.len());
+    if x.iter().all(|i| seen.insert(i)) {
         Ok(())
     } else {
         Err(ValidationError::new("not unique"))
@@ -381,6 +390,8 @@ pub struct TimeParam {
 mod tests {
     use super::*;
 
+    // ---- normal path ----
+
     #[test]
     fn page_data_new() {
         let page = PageData::new((vec![1, 2, 3], 7));
@@ -392,6 +403,12 @@ mod tests {
     fn page_data_serialize() {
         let value = serde_json::to_value(PageData::new((vec!["a"], 1))).unwrap();
         assert_eq!(value, serde_json::json!({"total": 1, "data": ["a"]}));
+    }
+
+    #[test]
+    fn normal_page_data_serialize_empty() {
+        let s = serde_json::to_string(&PageData::new((Vec::<u8>::new(), 0))).unwrap();
+        assert_eq!(s, r#"{"total":0,"data":[]}"#);
     }
 
     #[test]
@@ -416,6 +433,28 @@ mod tests {
     }
 
     #[test]
+    fn normal_pagination_deserialize_partial_fields() {
+        let p: PaginationParam = serde_json::from_str(r#"{"page": 5}"#).unwrap();
+        assert_eq!((p.page, p.size), (5, 10));
+        let p: PaginationParam = serde_json::from_str(r#"{"size": 20}"#).unwrap();
+        assert_eq!((p.page, p.size), (1, 20));
+        // Unknown fields are ignored.
+        let p: PaginationParam =
+            serde_json::from_str(r#"{"page": 2, "size": 20, "extra": true}"#).unwrap();
+        assert_eq!((p.page, p.size), (2, 20));
+    }
+
+    #[test]
+    fn normal_pagination_validate_accepts_legal_range() {
+        for (page, size) in [(1, 1), (5, 100), (u64::MAX, 100)] {
+            assert!(
+                PaginationParam { page, size }.validate().is_ok(),
+                "page={page} size={size}"
+            );
+        }
+    }
+
+    #[test]
     fn pagination_validate() {
         // Deserialization alone does not reject out-of-range values.
         let p: PaginationParam = serde_json::from_str(r#"{"page": 0}"#).unwrap();
@@ -435,31 +474,27 @@ mod tests {
     }
 
     #[test]
-    fn pagination_bounds_saturate() {
-        // `page: 0` (only reachable without validation) must not underflow.
-        let p = PaginationParam { page: 0, size: 10 };
-        assert_eq!((p.left(), p.right()), (0, 0));
-
-        // Huge values saturate instead of overflowing.
-        let p = PaginationParam {
-            page: u64::MAX,
-            size: 100,
-        };
-        assert_eq!(p.left(), u64::MAX);
-        assert_eq!(p.right(), u64::MAX);
-        assert_eq!(PaginationParam::round(u64::MAX), usize::MAX as usize);
-
-        // An out-of-range window yields an empty page instead of a panic.
-        let page = p.split(vec![1, 2, 3]);
-        assert_eq!(page.total, 3);
-        assert!(page.data.is_empty());
+    fn normal_pagination_split_pages() {
+        let first = PaginationParam { page: 1, size: 3 }.split(vec![1, 2, 3, 4]);
+        assert_eq!(first.data, vec![1, 2, 3]);
+        let last = PaginationParam { page: 2, size: 3 }.split(vec![1, 2, 3, 4]);
+        assert_eq!(last.data, vec![4]);
+        let empty = PaginationParam::default().split(Vec::<i32>::new());
+        assert_eq!(empty.total, 0);
+        assert!(empty.data.is_empty());
     }
 
     #[test]
     fn unique_validator_works() {
         assert!(unique_validator(&Vec::<u8>::new()).is_ok());
-        assert!(unique_validator(&vec![1, 2, 3]).is_ok());
-        assert!(unique_validator(&vec![1, 2, 2]).is_err());
+        assert!(unique_validator(&[1, 2, 3]).is_ok());
+        assert!(unique_validator(&[1, 2, 2]).is_err());
+    }
+
+    #[test]
+    fn normal_unique_validator_distinct() {
+        assert!(unique_validator(&[1]).is_ok());
+        assert!(unique_validator(&["a", "b", "c"]).is_ok());
     }
 
     #[test]
@@ -499,27 +534,509 @@ mod tests {
         assert!(req.validate().is_err());
     }
 
-    #[cfg(feature = "seaorm")]
     #[test]
-    fn time_param_deserialize() {
-        let p: TimeParam = serde_json::from_str(
-            r#"{"created_start": "2024-01-01T00:00:00Z", "created_end": "2024-01-01T23:59:59.5+08:00"}"#,
-        )
-        .unwrap();
-        assert!(p.created_start.is_some());
-        assert!(p.created_end.is_some());
-        assert!(p.updated_start.is_none());
-        assert!(p.updated_end.is_none());
-        // Non-UTC offsets are converted to UTC: 23:59:59.5+08:00 is 15:59:59.5Z.
-        let expect: DateTimeUtc = "2024-01-01T15:59:59.5Z".parse().unwrap();
-        assert_eq!(p.created_end.unwrap(), expect);
+    fn normal_ids_req_empty_list() {
+        let req: IDsReq = serde_json::from_value(serde_json::json!({"id": []})).unwrap();
+        assert!(req.id.is_empty());
+        assert!(req.validate().is_ok());
+    }
 
-        // A timezone offset is required: naive strings are rejected, even
-        // with the `T` separator (a space separator is accepted by RFC 3339
-        // when the offset is present).
-        assert!(
-            serde_json::from_str::<TimeParam>(r#"{"created_start": "2024-01-01T00:00:00"}"#)
-                .is_err()
-        );
+    #[test]
+    fn normal_ids_req_accepts_nil() {
+        let nil = HyUuid::nil();
+        let req: IDsReq =
+            serde_json::from_value(serde_json::json!({"id": [nil.to_string()]})).unwrap();
+        assert_eq!(req.id, vec![nil]);
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn normal_option_ids_empty_and_missing() {
+        let req: OptionIDsReq = serde_json::from_value(serde_json::json!({"id": []})).unwrap();
+        assert_eq!(req.id, Some(Vec::new()));
+        assert!(req.validate().is_ok());
+    }
+
+    // ---- boundary ----
+
+    #[test]
+    fn pagination_bounds_saturate() {
+        // `page: 0` (only reachable without validation) must not underflow.
+        let p = PaginationParam { page: 0, size: 10 };
+        assert_eq!((p.left(), p.right()), (0, 0));
+
+        // Huge values saturate instead of overflowing.
+        let p = PaginationParam {
+            page: u64::MAX,
+            size: 100,
+        };
+        assert_eq!(p.left(), u64::MAX);
+        assert_eq!(p.right(), u64::MAX);
+        assert_eq!(PaginationParam::round(u64::MAX), usize::MAX);
+        assert_eq!(PaginationParam::round(42), 42);
+
+        // An out-of-range window yields an empty page instead of a panic.
+        let page = p.split(vec![1, 2, 3]);
+        assert_eq!(page.total, 3);
+        assert!(page.data.is_empty());
+    }
+
+    #[test]
+    fn boundary_pagination_validation_rejects_out_of_range() {
+        for (page, size) in [(0, 10), (1, 0), (1, 101), (0, 0), (1, u64::MAX)] {
+            assert!(
+                PaginationParam { page, size }.validate().is_err(),
+                "page={page} size={size}"
+            );
+        }
+    }
+
+    #[test]
+    fn boundary_pagination_deserialize_rejects_bad_types() {
+        for input in [
+            r#"{"page": null}"#,
+            r#"{"page": -1}"#,
+            r#"{"page": 2.5}"#,
+            r#"{"page": true}"#,
+            r#"{"page": []}"#,
+            r#"{"page": "2"}"#,
+            r#"{"size": -1}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<PaginationParam>(input).is_err(),
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn boundary_pagination_unvalidated_values() {
+        // Deserialization does not validate; page 0 / size 0 must not panic.
+        let p = PaginationParam { page: 0, size: 10 };
+        assert_eq!((p.left(), p.right()), (0, 0));
+
+        let p = PaginationParam { page: 1, size: 0 };
+        assert_eq!((p.left(), p.right()), (0, 0));
+        let page = p.split(vec![1, 2, 3]);
+        assert_eq!(page.total, 3);
+        assert!(page.data.is_empty());
+
+        let p = PaginationParam { page: 5, size: 2 };
+        let page = p.split(vec![1, 2, 3]);
+        assert_eq!(page.total, 3);
+        assert!(page.data.is_empty());
+    }
+
+    #[test]
+    fn boundary_unique_validator_duplicates_and_error() {
+        let err = unique_validator(&[1, 2, 1]).unwrap_err();
+        assert_eq!(err.code.as_ref(), "not unique");
+        assert!(unique_validator(&["a", "a"]).is_err());
+    }
+
+    #[test]
+    fn boundary_ids_req_invalid() {
+        assert!(serde_json::from_value::<IDsReq>(serde_json::json!({})).is_err());
+        assert!(serde_json::from_value::<IDsReq>(serde_json::json!({"id": null})).is_err());
+        assert!(serde_json::from_value::<IDsReq>(serde_json::json!({"id": "x"})).is_err());
+        assert!(serde_json::from_value::<IDsReq>(serde_json::json!({"id": [1]})).is_err());
+        for bad in [
+            "not-a-uuid",
+            "550e8400e29b41d4a716446655440000",
+            "{550e8400-e29b-41d4-a716-446655440000}",
+            "urn:uuid:550e8400-e29b-41d4-a716-446655440000",
+        ] {
+            let v = serde_json::json!({"id": [bad]});
+            assert!(serde_json::from_value::<IDsReq>(v).is_err(), "{bad}");
+        }
+
+        let a = HyUuid::new();
+        let req: IDsReq =
+            serde_json::from_value(serde_json::json!({"id": [a.to_string(), a.to_string()]}))
+                .unwrap();
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn boundary_option_ids_invalid() {
+        assert!(serde_json::from_value::<OptionIDsReq>(serde_json::json!({"id": "x"})).is_err());
+        let a = HyUuid::new();
+        let req: OptionIDsReq =
+            serde_json::from_value(serde_json::json!({"id": [a.to_string(), a.to_string()]}))
+                .unwrap();
+        assert!(req.validate().is_err());
+    }
+
+    // ---- extreme ----
+
+    #[test]
+    fn extreme_pagination_u64_max() {
+        let input = format!(r#"{{"page": {}, "size": 100}}"#, u64::MAX);
+        let p: PaginationParam = serde_json::from_str(&input).unwrap();
+        assert!(p.validate().is_ok());
+        let page = p.split(vec![1, 2, 3]);
+        assert_eq!(page.total, 3);
+        assert!(page.data.is_empty());
+    }
+
+    // ---- SeaORM-dependent tests ----
+
+    #[cfg(feature = "seaorm")]
+    mod seaorm_tests {
+        use std::collections::BTreeMap;
+
+        use futures::executor::block_on;
+        use sea_orm::sea_query::ColumnRef;
+        use sea_orm::{DbBackend, MockDatabase, QueryFilter, QueryTrait, Value};
+
+        use super::*;
+
+        mod notes {
+            use sea_orm::entity::prelude::*;
+
+            #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+            #[sea_orm(table_name = "notes")]
+            pub struct Model {
+                #[sea_orm(primary_key, auto_increment = false)]
+                pub id: i64,
+                pub name: String,
+                pub created_at: DateTimeUtc,
+                pub updated_at: DateTimeUtc,
+            }
+
+            #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+            pub enum Relation {}
+
+            impl ActiveModelBehavior for ActiveModel {}
+        }
+
+        #[cfg(feature = "entity")]
+        impl crate::entity::DefaultColumnTrait for notes::Column {
+            fn get_created_at() -> impl ColumnTrait {
+                Self::CreatedAt
+            }
+
+            fn get_updated_at() -> impl ColumnTrait {
+                Self::UpdatedAt
+            }
+        }
+
+        fn ts(s: &str) -> DateTimeUtc {
+            s.parse().unwrap()
+        }
+
+        fn sample(name: &str) -> notes::Model {
+            notes::Model {
+                id: 1,
+                name: name.to_owned(),
+                created_at: ts("2024-01-01T00:00:00Z"),
+                updated_at: ts("2024-01-01T00:00:00Z"),
+            }
+        }
+
+        fn count_row(n: i64) -> BTreeMap<String, Value> {
+            BTreeMap::from([("num_items".to_owned(), Value::BigInt(Some(n)))])
+        }
+
+        fn col(c: notes::Column) -> ColumnRef {
+            ColumnRef::from(c)
+        }
+
+        fn expr(c: notes::Column) -> SimpleExpr {
+            SimpleExpr::Column(ColumnRef::from(c))
+        }
+
+        // ---- normal path ----
+
+        #[test]
+        fn normal_time_param_offsets_and_empty() {
+            let p: TimeParam = serde_json::from_str("{}").unwrap();
+            assert!(p.created_start.is_none());
+            assert!(p.created_end.is_none());
+            assert!(p.updated_start.is_none());
+            assert!(p.updated_end.is_none());
+            assert!(p.validate().is_ok());
+
+            let p: TimeParam = serde_json::from_str(
+                r#"{"created_start":"2024-01-01T12:00:00+08:00","updated_end":"2024-01-01T00:00:00Z"}"#,
+            )
+            .unwrap();
+            assert_eq!(p.created_start.unwrap(), ts("2024-01-01T04:00:00Z"));
+            assert_eq!(p.updated_end.unwrap(), ts("2024-01-01T00:00:00Z"));
+        }
+
+        #[test]
+        fn normal_parse_sort_asc_desc() {
+            let cols = vec![col(notes::Column::Name), col(notes::Column::CreatedAt)];
+            let cond = Condition::new_all().parse_sort("+name,-created_at", cols);
+            assert_eq!(cond.order.len(), 2);
+            assert_eq!(cond.order[0].1, Order::Asc);
+            assert_eq!(cond.order[1].1, Order::Desc);
+
+            let cond = Condition::new_all().parse_sort("name", vec![col(notes::Column::Name)]);
+            assert_eq!(cond.order.len(), 1);
+            assert_eq!(cond.order[0].1, Order::Asc);
+        }
+
+        #[test]
+        fn normal_parse_sort_option() {
+            let cols = || vec![col(notes::Column::Name)];
+            let cond = Condition::new_all().parse_sort_option(&None, cols());
+            assert!(cond.order.is_empty());
+            let cond = Condition::new_all().parse_sort_option(&Some("name".to_owned()), cols());
+            assert_eq!(cond.order.len(), 1);
+        }
+
+        #[test]
+        fn normal_parse_sort_whitelist() {
+            let cond =
+                Condition::new_all().parse_sort("name,unknown", vec![col(notes::Column::Name)]);
+            assert_eq!(cond.order.len(), 1);
+        }
+
+        #[test]
+        fn normal_add_sort_and_add_page_build() {
+            let cond = Condition::new_all()
+                .add_sort(expr(notes::Column::Name), Order::Asc)
+                .add_sort(expr(notes::Column::CreatedAt), Order::Desc)
+                .add_page(PaginationParam { page: 2, size: 5 });
+            let (q, page) = cond.build(notes::Entity::find());
+            let page = page.expect("pagination should be detached by build");
+            assert_eq!((page.page, page.size), (2, 5));
+
+            let sql = q.build(DbBackend::Sqlite).to_string();
+            assert!(sql.contains("ORDER BY"));
+            assert!(sql.contains("\"name\" ASC"));
+            assert!(sql.contains("\"created_at\" DESC"));
+        }
+
+        #[test]
+        fn normal_condition_build_filter_sort_sql() {
+            let (q, page) = Condition::new_all()
+                .add(notes::Column::Name.eq("alice"))
+                .add_option(None::<sea_orm::Condition>)
+                .build(notes::Entity::find());
+            assert!(page.is_none());
+            let sql = q.build(DbBackend::Sqlite).to_string();
+            assert!(sql.contains("WHERE"));
+            assert!(sql.contains("\"name\""));
+        }
+
+        #[cfg(feature = "entity")]
+        #[test]
+        fn normal_add_time_sql() {
+            let t = ts("2024-01-01T00:00:00Z");
+            let p = TimeParam {
+                created_start: Some(t),
+                created_end: Some(t),
+                updated_start: Some(t),
+                updated_end: Some(t),
+            };
+            let (q, _) = Condition::new_all()
+                .add_time::<notes::Column>(&p)
+                .build(notes::Entity::find());
+            let sql = q.build(DbBackend::Sqlite).to_string();
+            assert!(sql.contains("created_at"));
+            assert!(sql.contains("updated_at"));
+
+            let empty = TimeParam {
+                created_start: None,
+                created_end: None,
+                updated_start: None,
+                updated_end: None,
+            };
+            let base = Condition::new_all()
+                .build(notes::Entity::find())
+                .0
+                .build(DbBackend::Sqlite)
+                .to_string();
+            let with_empty = Condition::new_all()
+                .add_time::<notes::Column>(&empty)
+                .build(notes::Entity::find())
+                .0
+                .build(DbBackend::Sqlite)
+                .to_string();
+            assert_eq!(base, with_empty, "empty TimeParam should add no filter");
+        }
+
+        #[test]
+        fn normal_select_page_paged_mock() {
+            let db = MockDatabase::new(DbBackend::Sqlite)
+                .append_query_results([vec![sample("a"), sample("b")]])
+                .append_query_results([vec![count_row(5)]])
+                .into_connection();
+
+            let (rows, total) = block_on(
+                Condition::new_all()
+                    .add_page(PaginationParam { page: 2, size: 2 })
+                    .select_page(notes::Entity::find(), &db),
+            )
+            .unwrap();
+            assert_eq!(rows, vec![sample("a"), sample("b")]);
+            assert_eq!(total, 5);
+
+            let log = db.into_transaction_log();
+            let sql: Vec<_> = log
+                .iter()
+                .flat_map(|t| t.statements().iter().map(|s| s.sql.clone()))
+                .collect();
+            assert_eq!(sql.len(), 2);
+            assert!(sql[0].contains("LIMIT"));
+            assert!(sql[1].contains("COUNT(*)"));
+        }
+
+        #[test]
+        fn normal_select_page_unpaged_mock() {
+            let db = MockDatabase::new(DbBackend::Sqlite)
+                .append_query_results([vec![sample("a"), sample("b")]])
+                .into_connection();
+
+            let (rows, total) =
+                block_on(Condition::new_all().select_page(notes::Entity::find(), &db)).unwrap();
+            assert_eq!(rows.len(), 2);
+            assert_eq!(total, 2);
+        }
+
+        #[test]
+        fn normal_like_expr_escaping() {
+            let pattern = "50%_off\\".to_owned();
+            let sql = notes::Entity::find()
+                .filter((&pattern).like_expr(notes::Column::Name))
+                .build(DbBackend::Sqlite)
+                .to_string();
+            assert!(sql.contains("LIKE"));
+            assert!(sql.contains("ESCAPE"));
+        }
+
+        // ---- boundary ----
+
+        #[test]
+        fn boundary_parse_sort_edge_tokens() {
+            let cols = || vec![col(notes::Column::Name), col(notes::Column::CreatedAt)];
+            assert!(Condition::new_all().parse_sort("", cols()).order.is_empty());
+            assert!(
+                Condition::new_all()
+                    .parse_sort("+,-", cols())
+                    .order
+                    .is_empty()
+            );
+            assert!(
+                Condition::new_all()
+                    .parse_sort(" name", cols())
+                    .order
+                    .is_empty()
+            );
+            assert!(
+                Condition::new_all()
+                    .parse_sort("+ name", cols())
+                    .order
+                    .is_empty()
+            );
+            assert!(
+                Condition::new_all()
+                    .parse_sort("NAME", cols())
+                    .order
+                    .is_empty()
+            );
+            // Duplicate names: the first occurrence wins, later ones are ignored.
+            let cond = Condition::new_all().parse_sort("name,-name", cols());
+            assert_eq!(cond.order.len(), 1);
+            assert_eq!(cond.order[0].1, Order::Asc);
+        }
+
+        #[test]
+        fn boundary_parse_sort_skips_non_column_refs() {
+            // Refs without a column name (e.g. `*`) are ignored, not a panic.
+            let cond = Condition::new_all().parse_sort("anything", vec![ColumnRef::Asterisk(None)]);
+            assert!(cond.order.is_empty());
+        }
+
+        #[test]
+        fn boundary_time_param_rejects_naive_and_invalid_values() {
+            for input in [
+                r#"{"created_start":"2024-01-01T00:00:00"}"#,
+                r#"{"created_start":"2024-01-01"}"#,
+                r#"{"created_start":"2024-02-30T00:00:00Z"}"#,
+                r#"{"created_start":"2024-01-01T25:00:00Z"}"#,
+                r#"{"created_start":"2024-13-01T00:00:00Z"}"#,
+                r#"{"created_start":"2024-01-01T00:00:00Z junk"}"#,
+                r#"{"created_start":123}"#,
+                r#"{"created_start":true}"#,
+            ] {
+                assert!(serde_json::from_str::<TimeParam>(input).is_err(), "{input}");
+            }
+        }
+
+        #[test]
+        fn boundary_time_param_separator_and_precision() {
+            // RFC 3339 allows a space separator; chrono also accepts lowercase z.
+            let p: TimeParam =
+                serde_json::from_str(r#"{"created_start":"2024-01-01 12:00:00Z"}"#).unwrap();
+            assert!(p.created_start.is_some());
+            let p: TimeParam =
+                serde_json::from_str(r#"{"created_start":"2024-01-01T12:00:00z"}"#).unwrap();
+            assert!(p.created_start.is_some());
+            // More than nanosecond precision is accepted (truncated by chrono).
+            let p: TimeParam =
+                serde_json::from_str(r#"{"created_start":"2024-01-01T00:00:00.123456789123Z"}"#)
+                    .unwrap();
+            assert!(p.created_start.is_some());
+        }
+
+        #[test]
+        fn boundary_select_page_unvalidated_page_zero() {
+            let db = MockDatabase::new(DbBackend::Sqlite)
+                .append_query_results([vec![sample("a")]])
+                .append_query_results([vec![count_row(1)]])
+                .into_connection();
+
+            let (rows, total) = block_on(
+                Condition::new_all()
+                    .add_page(PaginationParam { page: 0, size: 1 })
+                    .select_page(notes::Entity::find(), &db),
+            )
+            .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(total, 1);
+
+            let log = db.into_transaction_log();
+            assert!(log[0].statements()[0].sql.contains("LIMIT"));
+        }
+
+        // ---- extreme ----
+
+        #[test]
+        fn extreme_time_param_offset_rollover_and_leap_second() {
+            // +08:00 midnight rolls back to the previous UTC day.
+            let p: TimeParam =
+                serde_json::from_str(r#"{"created_start":"2024-01-01T00:00:00+08:00"}"#).unwrap();
+            assert_eq!(p.created_start.unwrap(), ts("2023-12-31T16:00:00Z"));
+
+            // Leap-second input is accepted (chrono normalizes it internally).
+            let p: TimeParam =
+                serde_json::from_str(r#"{"created_start":"2016-12-31T23:59:60Z"}"#).unwrap();
+            assert!(p.created_start.is_some());
+        }
+
+        #[test]
+        fn extreme_parse_sort_long_token_list() {
+            let tokens = (0..10_000)
+                .map(|i| format!("unknown{i}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let cond = Condition::new_all().parse_sort(&tokens, vec![col(notes::Column::Name)]);
+            assert!(cond.order.is_empty());
+        }
+
+        #[test]
+        fn extreme_like_expr_empty_and_unicode() {
+            for pattern in [String::new(), "中文%_".to_owned()] {
+                let sql = notes::Entity::find()
+                    .filter((&pattern).like_expr(notes::Column::Name))
+                    .build(DbBackend::Sqlite)
+                    .to_string();
+                assert!(sql.contains("LIKE"));
+            }
+        }
     }
 }

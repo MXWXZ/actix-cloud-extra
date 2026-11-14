@@ -1,22 +1,16 @@
 [package]
 name = "actix-cloud-extra"
 version = "0.1.7"
-edition = "2024"
-authors = ["MXWXZ <matrixwxz@gmail.com>"]
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
 description = "Extra tools for Actix Cloud."
-license = "MIT"
-repository = "https://github.com/MXWXZ/actix-cloud-extra"
+license.workspace = true
+repository.workspace = true
 
 [features]
 default = ["api", "entity", "logger", "seaorm", "macros"]
-api = [
-    "hyuuid",
-    "utils",
-    "actix-cloud/utils",
-    "dep:serde-inline-default",
-    "dep:validator",
-    "dep:derivative",
-]
+api = ["hyuuid", "utils", "dep:validator"]
 entity = ["seaorm", "dep:serde", "dep:serde_json"]
 utils = ["dep:base64", "dep:infer"]
 logger = ["actix-cloud/logger"]
@@ -25,31 +19,55 @@ seaorm = ["dep:sea-orm", "actix-cloud-extra-macros/seaorm"]
 macros = ["dep:actix-cloud-extra-macros"]
 
 [dependencies]
-anyhow = { version = "1.0", optional = true }
-derivative = { version = "2.2", optional = true }
-uuid = { version = "1.26", features = [
+anyhow = { version = "1.0.104", optional = true }
+uuid = { version = "1.29.2", features = [
     "v4",
     "macro-diagnostics",
     "fast-rng",
 ], optional = true }
-serde = { version = "1.0", features = ["derive"], optional = true }
-serde-inline-default = { version = "1.0", optional = true }
-serde_json = { version = "1.0", optional = true }
-validator = { version = "0.20", features = ["derive"], optional = true }
-base64 = { version = "0.23", optional = true }
-infer = { version = "0.22", optional = true }
+serde = { version = "1.0.229", features = ["derive"], optional = true }
+serde_json = { version = "1.0.154", optional = true }
+# Fixed to 0.20.0 since actix-web-validator 7.0.0 depends on it.
+validator = { version = "0.20.0", features = ["derive"], optional = true }
+base64 = { version = "0.23.1", optional = true }
+infer = { version = "0.22.0", optional = true }
 
-sea-orm = { version = "2.0", features = [
-    "sqlx-sqlite",
-    "runtime-tokio-rustls",
+# Only the features used by this crate: derives, JSON columns, `DateTimeUtc`
+# and `HyUuid`'s `DeriveValueType`. Database drivers and async runtimes are up
+# to the application.
+sea-orm = { version = "2.0.4", default-features = false, features = [
     "macros",
-    "debug-print",
+    "with-chrono",
+    "with-json",
+    "with-uuid",
 ], optional = true }
-actix-cloud = { version = "0.7", default-features = false, optional = true }
-actix-cloud-extra-macros = { version = "0.1", default-features = false, path = "../actix-cloud-extra-macros", optional = true }
+actix-cloud = { version = "0.8.0", default-features = false, optional = true }
+actix-cloud-extra-macros = { version = "0.1.7", default-features = false, path = "../actix-cloud-extra-macros", optional = true }
 
 [dev-dependencies]
-serde_json = "1.0"
+serde_json = "1.0.154"
+# `mock` is required for MockDatabase; it stays test-only because this is a
+# dev-dependency (features unify with the normal dependency during tests).
+sea-orm = { version = "2.0.4", default-features = false, features = [
+    "macros",
+    "with-chrono",
+    "with-json",
+    "with-uuid",
+    "mock",
+] }
+chrono = "0.4.45"
+async-trait = "0.1.92"
+futures = "0.3.34"
+
+[[test]]
+name = "macros_repo"
+path = "tests/macros_repo.rs"
+required-features = ["api", "entity", "hyuuid", "macros", "seaorm"]
+
+[[test]]
+name = "macros_entity"
+path = "tests/macros_entity.rs"
+required-features = ["api", "entity", "hyuuid", "macros", "seaorm"]
 
 [package.metadata.docs.rs]
 all-features = true

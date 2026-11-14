@@ -7,7 +7,7 @@ all: help
 
 ## check: Check code and style.
 check:
-	@cargo clippy --all-features -- -D clippy::all
+	@cargo clippy --all-features --all-targets -- -D clippy::all
 	@cargo fmt --all -- --check
 
 ## doc: Test documents.

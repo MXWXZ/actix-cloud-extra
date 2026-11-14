@@ -72,3 +72,123 @@ pub fn start_logger(
         (None, None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use actix_cloud::tracing::Level;
+    use serde_json::{Map, Value};
+
+    use super::*;
+
+    fn item(target: &str, filename: Option<&str>) -> LogItem {
+        LogItem {
+            time: Value::Null,
+            level: Level::INFO,
+            message: String::new(),
+            target: target.to_owned(),
+            fields: Map::new(),
+            span: Map::new(),
+            filename: filename.map(str::to_owned),
+            line_number: None,
+        }
+    }
+
+    fn filename_of(target: &str, filename: &str) -> String {
+        transformer(item(target, Some(filename)))
+            .filename
+            .expect("filename should stay set")
+    }
+
+    fn expected_path(parts: &[&str]) -> String {
+        let mut p = PathBuf::new();
+        for part in parts {
+            p.push(part);
+        }
+        p.to_string_lossy().into_owned()
+    }
+
+    // ---- normal path ----
+
+    #[test]
+    fn normal_start_logger_disabled() {
+        let (logger, guard) = start_logger(false, true, true, |_| true);
+        assert!(logger.is_none());
+        assert!(guard.is_none());
+    }
+
+    #[test]
+    fn normal_transformer_keeps_plain_target() {
+        let out = transformer(item("app", None));
+        assert_eq!(out.target, "app");
+        assert!(out.filename.is_none());
+    }
+
+    #[test]
+    fn normal_transformer_trims_target() {
+        assert_eq!(transformer(item("app::db::query", None)).target, "app");
+    }
+
+    #[test]
+    fn normal_transformer_truncates_at_src() {
+        assert_eq!(
+            filename_of("app", "/a/b/src/c/d/main.rs"),
+            expected_path(&["src", "c", "d", "main.rs"])
+        );
+    }
+
+    // ---- boundary ----
+
+    #[test]
+    fn boundary_transformer_empty_and_leading_separator_target() {
+        assert_eq!(transformer(item("", None)).target, "");
+        // `split("::").next()` never returns None, so "unknown" is unreachable.
+        assert_eq!(transformer(item("::foo", None)).target, "");
+    }
+
+    #[test]
+    fn boundary_transformer_uses_last_src() {
+        assert_eq!(
+            filename_of("app", "/a/src/b/src/c.rs"),
+            expected_path(&["src", "c.rs"])
+        );
+    }
+
+    #[test]
+    fn boundary_transformer_src_case_insensitive() {
+        assert_eq!(
+            filename_of("app", "/x/SRC/y.rs"),
+            expected_path(&["SRC", "y.rs"])
+        );
+    }
+
+    #[test]
+    fn boundary_transformer_no_src_and_none() {
+        assert_eq!(
+            filename_of("app", "a/b/main.rs"),
+            expected_path(&["a", "b", "main.rs"])
+        );
+        assert!(transformer(item("app", None)).filename.is_none());
+    }
+
+    #[test]
+    fn boundary_transformer_empty_and_src_like_components() {
+        assert_eq!(filename_of("app", ""), expected_path(&[]));
+        assert_eq!(
+            filename_of("app", "srcfile/x.rs"),
+            expected_path(&["srcfile", "x.rs"])
+        );
+        assert_eq!(filename_of("app", "src.rs"), expected_path(&["src.rs"]));
+    }
+
+    // ---- boundary (absolute paths) ----
+
+    #[cfg(unix)]
+    #[test]
+    fn boundary_transformer_keeps_absolute_path_without_src() {
+        // `Path::iter()` yields the root, so an absolute path without `src`
+        // survives the rebuild unchanged.
+        assert_eq!(filename_of("app", "/a/b/main.rs"), "/a/b/main.rs");
+    }
+}
