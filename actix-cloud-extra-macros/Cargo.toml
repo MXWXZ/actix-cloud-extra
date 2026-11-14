@@ -1,12 +1,13 @@
 [package]
 name = "actix-cloud-extra-macros"
-version = "0.1.7"
+version = "0.1.8"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 description = "Proc macros for Actix Cloud Extra."
 license.workspace = true
 repository.workspace = true
+readme = "../README.md"
 
 [features]
 default = ["seaorm"]

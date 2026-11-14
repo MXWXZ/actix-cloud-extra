@@ -1,12 +1,13 @@
 [package]
 name = "actix-cloud-extra"
-version = "0.1.7"
+version = "0.1.8"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 description = "Extra tools for Actix Cloud."
 license.workspace = true
 repository.workspace = true
+readme = "../README.md"
 
 [features]
 default = ["api", "entity", "logger", "seaorm", "macros"]
@@ -42,7 +43,7 @@ sea-orm = { version = "2.0.4", default-features = false, features = [
     "with-uuid",
 ], optional = true }
 actix-cloud = { version = "0.8.0", default-features = false, optional = true }
-actix-cloud-extra-macros = { version = "0.1.7", default-features = false, path = "../actix-cloud-extra-macros", optional = true }
+actix-cloud-extra-macros = { version = "0.1.8", default-features = false, path = "../actix-cloud-extra-macros", optional = true }
 
 [dev-dependencies]
 serde_json = "1.0.154"

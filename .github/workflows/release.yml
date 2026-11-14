@@ -47,7 +47,7 @@ jobs:
           test "$tag_version" = "$macros_version"
           test "$tag_version" = "$dep_version"
           for crate in actix-cloud-extra-macros actix-cloud-extra; do
-            code="$(curl -s -o /dev/null -w '%{http_code}' "https://crates.io/api/v1/crates/$crate/$tag_version")"
+            code="$(curl -A 'actix-cloud-extra-release-check' -s -o /dev/null -w '%{http_code}' "https://crates.io/api/v1/crates/$crate/$tag_version")"
             if [ "$code" = "200" ]; then
               echo "::error::$crate $tag_version is already published"
               exit 1

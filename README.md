@@ -2,21 +2,28 @@
 
 [![crates.io](https://img.shields.io/crates/v/actix-cloud-extra?label=crates.io&style=flat-square)](https://crates.io/crates/actix-cloud-extra)
 [![docs.rs](https://img.shields.io/docsrs/actix-cloud-extra?style=flat-square)](https://docs.rs/actix-cloud-extra/latest)
+[![CI](https://github.com/MXWXZ/actix-cloud-extra/actions/workflows/ci.yml/badge.svg)](https://github.com/MXWXZ/actix-cloud-extra/actions/workflows/ci.yml)
 ![license](https://img.shields.io/github/license/mxwxz/actix-cloud-extra?style=flat-square)
 
-Actix Cloud Extra provides extra tools for [Actix Cloud](https://github.com/MXWXZ/actix-cloud).
+English | [简体中文](https://github.com/MXWXZ/actix-cloud-extra/blob/main/README_CN.md)
 
-Actix Cloud Extra is highly configurable: you can enable only the features you need, implement your own feature backend or even use other libraries.
+Extra tools for building [Actix Cloud](https://github.com/MXWXZ/actix-cloud) services on top of SeaORM: a strict UUID ID type, pagination and query helpers, entity/proc macros, and a default logger.
 
-| Feature           | Default  | Description                                                     |
-| ----------------- | -------- | --------------------------------------------------------------- |
-| [hyuuid](#hyuuid) | enabled  | Strictly hyphenated UUID v4 ID type                             |
-| [api](#api)       | enabled  | Pagination, query condition builder and common request payloads |
-| [entity](#entity) | enabled  | SeaORM entity helpers                                           |
-| [logger](#logger) | enabled  | Default logger for Actix Cloud applications                     |
-| [seaorm](#seaorm) | enabled  | SeaORM query helpers                                            |
-| [macros](#macros) | enabled  | Proc macros (`default_repo`, `entity_id`, ...)                  |
-| [utils](#utils)   | disabled | String and data URL helpers (pulled in by `api`)                |
+Every module is behind a cargo feature, so you can compile only what you use.
+
+## Features
+
+| Feature | Default | Enables | Description |
+| --- | --- | --- | --- |
+| `hyuuid` | yes | `uuid`, `anyhow`, `serde` | `HyUuid`, a strictly hyphenated UUID v4 ID type |
+| `api` | yes | `hyuuid`, `utils`, `validator` | Pagination, `Condition`, and common request payloads |
+| `entity` | yes | `seaorm`, `serde`, `serde_json` | `VecString` and `DefaultColumnTrait` |
+| `logger` | yes | `actix-cloud/logger` | `start_logger`, a default logger |
+| `seaorm` | yes | `sea-orm` | `Condition`, `SelectPage`, and `IntoExpr` helpers |
+| `macros` | yes | proc-macro crate | `default_repo`, `entity_id`, `entity_timestamp`, ... |
+| `utils` | no | `base64`, `infer` | `StringUtil` and `DataUrl` |
+
+The default features are `api`, `entity`, `logger`, `seaorm`, and `macros`; `api` pulls in `hyuuid` and `utils`, and `entity` pulls in `seaorm`.
 
 ## Installation
 
@@ -32,27 +39,27 @@ Or with only the features you need:
 actix-cloud-extra = { version = "0.1", default-features = false, features = ["hyuuid", "utils"] }
 ```
 
-Requires a recent stable Rust toolchain (edition 2024).
+**MSRV:** Rust 1.94 (edition 2024).
 
 ## Guide
 
 ### hyuuid
 
-`HyUuid` is the universal ID type: a wrapped `Uuid` strictly serialized/deserialized as a 36-char hyphenated string.
+`HyUuid` is the universal ID type: a wrapped `Uuid` serialized and deserialized as a 36-char hyphenated string.
 
 ```rust
 use actix_cloud_extra::HyUuid;
 
 let id = HyUuid::new(); // random UUID v4
-let id = HyUuid::parse("550e8400-e29b-41d4-a716-446655440000")?; // strictly UUID v4
+let id = HyUuid::parse("550e8400-e29b-41d4-a716-446655440000")?;
 assert_eq!(id.to_string(), "550e8400-e29b-41d4-a716-446655440000");
 ```
 
-JSON serialization only accepts the 36-char hyphenated form; other textual formats (simple, braced, URN) and non-v4 versions are rejected. The nil UUID is accepted so `Default` / `nil()` can roundtrip through serde.
+Only the 36-char hyphenated form is accepted; simple, braced, and URN forms are rejected, and non-nil values must be version 4. The nil UUID is accepted so `Default` / `nil()` can roundtrip through serde. With the `seaorm` feature, `HyUuid` also derives `DeriveValueType` and can be used directly as a SeaORM column type.
 
 ### api
 
-API helpers for pagination and dynamic queries.
+Pagination and dynamic query helpers (requires the `api` feature; `seaorm` adds the query builder).
 
 `PaginationParam` defaults to page 1, size 10 and validates `page >= 1`, `1 <= size <= 100`:
 
@@ -60,52 +67,61 @@ API helpers for pagination and dynamic queries.
 { "page": 2, "size": 20 }
 ```
 
-Request-derived parameters should be validated. `select_page` additionally rejects `size == 0` and offsets that would overflow `u64` with an error instead of panicking.
+Validation is opt-in: call `validate()` on request-derived values. `select_page` additionally rejects `size == 0` and offsets that would overflow `u64` instead of panicking. To call `validate()`, add the matching `validator = "0.20"` dependency (`actix-web-validator` 7 uses the same version).
 
-`Condition` is the query hub: build filters, sort and pagination fluently, then run it.
+`Condition` is the query hub: build filters, sorting, and pagination fluently, then execute it.
 
 ```rust
 use actix_cloud_extra::api::{Condition, IntoExpr, PageData, PaginationParam};
+use sea_orm::DatabaseConnection;
 
-let page: PaginationParam = ...;    // from request
-let sort: Option<String> = ...;     // e.g. "-created_at,username"
-let name = &"ad".to_string();
+let page = PaginationParam { page: 1, size: 20 }; // validate request-derived values
+let sort = Some("-created_at,username".to_owned());
+let name = "ad".to_string();
 
 let cond = Condition::new_all()
-    .add(name.like_expr(user::Column::Username))    // username LIKE '%ad%'
+    .add((&name).like_expr(user::Column::Username)) // username LIKE '%ad%'
     .parse_sort_option(&sort, vec![
         user::Column::Id.into(),
         user::Column::CreatedAt.into(),
     ])
     .add_page(page);
 
+let db: &DatabaseConnection = ...;
 let (data, total) = cond.select_page(user::Entity::find(), &db).await?;
 let rsp = PageData::new((data, total));
 ```
 
-Sort names not present in the whitelist are silently ignored, so `parse_sort_option` is safe to feed straight from user input. Use `Condition::add_time` with `TimeParam` (deserialized from RFC 3339 strings like `2024-01-01T00:00:00Z`; a timezone offset is required) to filter on creation/update time ranges, see [entity](#entity). `IDsReq` / `OptionIDsReq` carry a list of IDs and reject duplicates via validation; cap the list length at the request layer.
+Sort names not present in the whitelist are silently ignored, so `parse_sort_option` is safe to feed straight from user input. `Condition::add_time` consumes a `TimeParam` deserialized from RFC 3339 strings (a timezone offset is required):
+
+```json
+{ "created_start": "2024-01-01T00:00:00Z", "updated_end": "2024-01-31T23:59:59Z" }
+```
+
+`IDsReq` / `OptionIDsReq` carry a list of IDs and reject duplicates via `validate()`. Cap the list length and the sort/search input at the request layer.
 
 ### entity
 
-SeaORM entity helpers.
+SeaORM entity helpers:
 
-- `VecString`: `Vec<String>` stored as a JSON array column.
-- `DefaultColumnTrait`: exposes the `created_at`/`updated_at` columns; implemented automatically by the `entity_timestamp` macro and consumed by `Condition::add_time`.
+- `VecString`: a `Vec<String>` stored as a JSON array column.
+- `DefaultColumnTrait`: exposes the `created_at` / `updated_at` columns; implemented by the `entity_timestamp` macro and consumed by `Condition::add_time`.
 
 ```rust
 use actix_cloud_extra::entity::VecString;
 
-#[derive(...)]
 pub struct Model {
-    pub tags: VecString,    // stored as a JSON array
+    // ...
+    pub tags: VecString, // stored as a JSON array column
 }
 ```
 
 ### logger
 
-Provide default logger:
-- Keeps only the first target path before `::` (e.g., `project::module1::module2` => `project`). 
-- Keeps only the path starting from the last `src` (e.g., `/a/b/src/c/d/main.rs` => `src/c/d/main.rs`).
+A default logger for Actix Cloud applications:
+
+- Keeps only the first target path before `::` (`project::module1::module2` => `project`).
+- Keeps only the path starting from the last `src` (`/a/b/src/c/d/main.rs` => `src/c/d/main.rs`).
 
 ```rust
 use actix_cloud_extra::logger::start_logger;
@@ -114,7 +130,7 @@ let (logger, _guard) = start_logger(
     /* enable  */ true,
     /* json    */ false,
     /* verbose */ true,        // file name, line number and DEBUG level
-    /* filter  */ |_| true,
+    /* filter  */ |_| true,    // fn(&LogItem) -> bool
 );
 ```
 
@@ -125,10 +141,13 @@ Returns `(None, None)` when `enable` is `false`; the guard stops logging when dr
 Typical entity setup with the provided macros:
 
 ```rust
+use actix_cloud_extra::HyUuid;
+use actix_cloud_extra::macros::{
+    default_repo, entity_behavior, entity_id, entity_timestamp, partial_entity,
+};
 use sea_orm::entity::prelude::*;
 
-#[sea_orm::model]
-#[derive(Clone, Debug, PartialEq, Eq, Default, DeriveEntityModel)]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "user")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -138,11 +157,14 @@ pub struct Model {
     pub updated_at: DateTimeUtc,
 }
 
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
 #[entity_id(HyUuid::new())]     // generate `id` on insert when not set
-#[entity_timestamp]             // handle `created_at` and `updated_at`
+#[entity_timestamp]             // created_at/updated_at on insert, updated_at on update
 impl ActiveModel {}
 
-#[entity_behavior]              // enable `entity_id` and `entity_timestamp` on save
+#[entity_behavior]              // run both helpers in before_save
 impl ActiveModelBehavior for ActiveModel {}
 
 pub struct UserRepo;
@@ -150,19 +172,31 @@ pub struct UserRepo;
 #[default_repo(user)]           // find / find_by_id / delete_all / delete / count
 impl UserRepo {}
 
-#[partial_entity(user::Model)]
-#[derive(serde::Serialize)]
+#[partial_entity(user::Model)]  // implement From<user::Model>
+#[derive(Debug, serde::Serialize)]
 pub struct UserRsp {
     pub id: HyUuid,
     pub username: String,
 }
-
-let rsp: UserRsp = model.into();
 ```
+
+The macros expand to code that references `sea_orm`, `chrono`, `async-trait`, and `anyhow`, so those must be direct dependencies of your crate (and `sea_orm::entity::prelude::*` must be in scope for `DateTimeUtc`, `EntityTrait`, and `PaginatorTrait`):
+
+```toml
+[dependencies]
+actix-cloud-extra = { version = "0.1", features = ["entity", "macros", "seaorm"] }
+anyhow = "1"
+async-trait = "0.1"
+chrono = "0.4"
+sea-orm = "2"
+serde = { version = "1", features = ["derive"] }
+```
+
+Add the SeaORM driver/runtime features your application needs. The generated repo methods perform no authorization or tenant scoping; wrap `find_by_id` / `delete` with ownership checks and do not expose `delete_all` directly. Do not map untrusted request data into `id` or timestamp fields.
 
 ### macros
 
-Re-export of the proc macros (`default_repo`, `entity_id`, `entity_timestamp`, `entity_behavior`, `partial_entity`), see [seaorm](#seaorm) for usage.
+Re-export of the proc macros (`default_repo`, `entity_id`, `entity_timestamp`, `entity_behavior`, `partial_entity`); see [seaorm](#seaorm) for usage.
 
 ### utils
 
@@ -172,14 +206,25 @@ String helpers (`StringUtil`, implemented for all `AsRef<str>`) and data URL hel
 use actix_cloud_extra::utils::{DataUrl, StringUtil};
 
 assert!("0123456789abcdef".is_hex());
+assert!(!"".is_hex());
 assert_eq!("a%b_c\\d".like_escape(), "a\\%b\\_c\\\\d");
 
 let url = DataUrl::new(bytes).unwrap().encode();    // data:image/png;base64,...
 let data = DataUrl::decode(&url).unwrap();
 ```
 
-`DataUrl::decode` ignores the declared prefix and infers the MIME type from the bytes; treat it as an untrusted hint and bound the input size at the request layer. `is_hex` returns `false` for an empty string.
+`DataUrl::decode` ignores the declared prefix and infers the MIME type from the bytes; treat it as an untrusted hint and bound the input size at the request layer.
+
+## Security notes
+
+- Validate request-derived `PaginationParam`; `select_page` rejects `size == 0` and overflowing offsets, but does not enforce the size limit for you.
+- A `Condition` without `add_page` loads the whole result set. Always paginate request-facing queries and enforce an upper bound.
+- Cap ID-list, sort-string, LIKE-term, and data-URL lengths at the edge.
+- `DataUrl::decode` infers MIME from content and ignores the declared MIME. Apply a MIME allowlist before serving decoded data.
+- `HyUuid` accepts nil and non-RFC variants as long as the version nibble is 4; do not treat nil as an authorized ID.
+- Call `start_logger` exactly once at startup; it panics if a global subscriber already exists.
+- Generated repo methods do no authorization scoping; do not expose `delete_all` and do not map untrusted input into `id` / `created_at`.
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](https://github.com/MXWXZ/actix-cloud-extra/blob/main/LICENSE).
